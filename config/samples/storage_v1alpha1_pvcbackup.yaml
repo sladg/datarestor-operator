@@ -1,9 +1,79 @@
 apiVersion: storage.cheap-man-ha-store.com/v1alpha1
 kind: PVCBackup
 metadata:
-  labels:
-    app.kubernetes.io/name: cheap-man-ha-store
-    app.kubernetes.io/managed-by: kustomize
   name: pvcbackup-sample
+  namespace: default
 spec:
-  # TODO(user): Add fields here
+  # PVC selector configuration
+  pvcSelector:
+    # Select PVCs by labels
+    labelSelector:
+      matchLabels:
+        backup.enabled: "true"
+        app: database
+
+    # Specific namespaces to monitor
+    namespaces:
+      - default
+      - database
+
+    # Specific PVC names (optional)
+    names:
+      - postgres-data
+      - mysql-data
+
+  # Backup targets with priorities
+  backupTargets:
+    # Primary target - NFS (highest priority)
+    - name: nfs-primary
+      priority: 1
+      type: nfs
+      nfs:
+        server: "192.168.1.100"
+        path: "/backups"
+        mountOptions:
+          - "nfsvers=4"
+          - "soft"
+      retention:
+        maxSnapshots: 10
+        maxAge: "168h" # 7 days
+
+    # Secondary target - S3 (lower priority)
+    - name: s3-secondary
+      priority: 2
+      type: s3
+      s3:
+        bucket: "pvc-backups"
+        region: "us-west-2"
+        endpoint: "https://s3.us-west-2.amazonaws.com"
+        accessKeyID: "AKIAIOSFODNN7EXAMPLE"
+        secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        pathPrefix: "backups"
+      retention:
+        maxSnapshots: 30
+        maxAge: "720h" # 30 days
+
+  # Backup schedule configuration
+  schedule:
+    cron: "0 2 * * *" # Daily at 2 AM
+    stopPods: true # Stop pods during backup for data integrity
+    waitForHealthy: true # Wait for pod health before backup
+
+  # Enable automatic restore for new PVCs
+  autoRestore: true
+
+  # Init container configuration for restore waiting
+  initContainer:
+    image: "busybox:1.35"
+    command: ["/bin/sh"]
+    args:
+      - "-c"
+      - "echo 'Waiting for PVC restore to complete...' && sleep 30"
+
+  # Restic configuration for plain data backup
+  restic:
+    repository: "s3:https://s3.us-west-2.amazonaws.com/pvc-backups-restic"
+    password: "restic-password"
+    flags:
+      - "--verbose"
+      - "--cache-dir=/tmp/restic"

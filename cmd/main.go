@@ -202,10 +202,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.PVCBackupReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err := controller.NewPVCBackupReconciler(mgr.GetClient(), mgr.GetScheme()).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PVCBackup")
 		os.Exit(1)
 	}

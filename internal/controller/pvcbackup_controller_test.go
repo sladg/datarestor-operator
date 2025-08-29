@@ -1,19 +1,3 @@
-/*
-Copyright 2025.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package controller
 
 import (
@@ -21,11 +5,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
 )
@@ -40,18 +23,40 @@ var _ = Describe("PVCBackup Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		pvcbackup := &storagev1alpha1.PVCBackup{}
+		pvcBackup := &storagev1alpha1.PVCBackup{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind PVCBackup")
-			err := k8sClient.Get(ctx, typeNamespacedName, pvcbackup)
+			err := k8sClient.Get(ctx, typeNamespacedName, pvcBackup)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &storagev1alpha1.PVCBackup{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: storagev1alpha1.PVCBackupSpec{
+						BackupTargets: []storagev1alpha1.BackupTarget{
+							{
+								Name:     "test-s3",
+								Type:     "s3",
+								Priority: 1,
+								S3: &storagev1alpha1.S3Config{
+									Bucket: "test-bucket",
+									Region: "us-west-2",
+								},
+							},
+						},
+						PVCSelector: storagev1alpha1.PVCSelector{
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app": "test",
+								},
+							},
+						},
+						Schedule: storagev1alpha1.BackupSchedule{
+							Cron: "0 0 * * *", // Daily at midnight
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -68,10 +73,7 @@ var _ = Describe("PVCBackup Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &PVCBackupReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
+			controllerReconciler := NewPVCBackupReconciler(k8sClient, k8sClient.Scheme())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,

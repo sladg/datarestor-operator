@@ -1,135 +1,239 @@
-# cheap-man-ha-store
-// TODO(user): Add simple overview of use/purpose
+# PVC Backup Operator
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A Kubernetes operator for automated PVC backup and restore operations with support for multiple backup targets and priorities.
 
-## Getting Started
+## Features
+
+- **Automated PVC Backup**: Schedule-based backups using cron expressions
+- **Multiple Backup Targets**: Support for S3 and NFS with priority-based selection
+- **Data Integrity**: Option to stop pods during backup for consistent snapshots
+- **Automatic Restore**: Restore new PVCs from existing backups
+- **Init Container Support**: Wait for restore completion before starting applications
+- **Retention Policies**: Configurable snapshot retention per target
+- **Health Checks**: Wait for pod health before backup operations
+- **Restic Integration**: Plain data backup using restic for manual intervention
+
+## Architecture
+
+The operator watches for:
+
+- `PVCBackup` custom resources
+- `PersistentVolumeClaim` objects
+- `Pod` objects using PVCs
+
+## Installation
 
 ### Prerequisites
-- go version v1.24.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+- Kubernetes 1.24+
+- VolumeSnapshot CRD (for volume snapshots)
+- S3-compatible storage or NFS server
 
-```sh
-make docker-build docker-push IMG=<some-registry>/cheap-man-ha-store:tag
-```
+### Deploy the Operator
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
-
-```sh
+```bash
+# Install CRDs
 make install
+
+# Deploy the operator
+make deploy
+
+# Or build and run locally
+make run
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+## Usage
 
-```sh
-make deploy IMG=<some-registry>/cheap-man-ha-store:tag
+### Basic PVCBackup Configuration
+
+```yaml
+apiVersion: storage.cheap-man-ha-store.com/v1alpha1
+kind: PVCBackup
+metadata:
+  name: database-backup
+  namespace: default
+spec:
+  # Select PVCs to backup
+  pvcSelector:
+    labelSelector:
+      matchLabels:
+        backup.enabled: "true"
+        app: database
+    namespaces:
+      - default
+      - database
+
+  # Backup targets with priorities
+  backupTargets:
+    - name: nfs-primary
+      priority: 1
+      type: nfs
+      nfs:
+        server: "192.168.1.100"
+        path: "/backups"
+      retention:
+        maxSnapshots: 10
+        maxAge: "168h"
+
+    - name: s3-secondary
+      priority: 2
+      type: s3
+      s3:
+        bucket: "pvc-backups"
+        region: "us-west-2"
+        accessKeyID: "your-access-key"
+        secretAccessKey: "your-secret-key"
+      retention:
+        maxSnapshots: 30
+
+  # Backup schedule
+  schedule:
+    cron: "0 2 * * *" # Daily at 2 AM
+    stopPods: true # Stop pods for data integrity
+    waitForHealthy: true
+
+  # Enable automatic restore
+  autoRestore: true
+
+  # Init container for restore waiting
+  initContainer:
+    image: "busybox:1.35"
+    command: ["/bin/sh"]
+    args:
+      - "-c"
+      - "echo 'Waiting for PVC restore...' && sleep 30"
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+### PVC Selection
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+The operator supports multiple ways to select PVCs:
 
-```sh
-kubectl apply -k config/samples/
+1. **Label Selector**: Use Kubernetes label selectors
+2. **Namespace Filtering**: Specify namespaces to monitor
+3. **Name Filtering**: List specific PVC names
+
+### Backup Targets
+
+#### NFS Target
+
+```yaml
+backupTargets:
+  - name: nfs-backup
+    priority: 1
+    type: nfs
+    nfs:
+      server: "192.168.1.100"
+      path: "/backups"
+      mountOptions:
+        - "nfsvers=4"
+        - "soft"
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+#### S3 Target
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
+```yaml
+backupTargets:
+  - name: s3-backup
+    priority: 2
+    type: s3
+    s3:
+      bucket: "pvc-backups"
+      region: "us-west-2"
+      endpoint: "https://s3.us-west-2.amazonaws.com"
+      accessKeyID: "your-key"
+      secretAccessKey: "your-secret"
+      pathPrefix: "backups"
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
+### Retention Policies
 
-```sh
-make uninstall
+Configure how many snapshots to keep:
+
+```yaml
+retention:
+  maxSnapshots: 10 # Keep max 10 snapshots
+  maxAge: "168h" # Keep snapshots for 7 days
 ```
 
-**UnDeploy the controller from the cluster:**
+### Automatic Restore
 
-```sh
-make undeploy
+Enable automatic restore for new PVCs:
+
+```yaml
+spec:
+  autoRestore: true
+
+  # PVCs with this label will be automatically restored
+  pvcSelector:
+    labelSelector:
+      matchLabels:
+        backup.restore: "true"
 ```
 
-## Project Distribution
+## Development
 
-Following the options to release and provide this solution to the users.
+### Building
 
-### By providing a bundle with all YAML files
+```bash
+# Generate manifests
+make manifests
 
-1. Build the installer for the image built and published in the registry:
+# Build the operator
+make build
 
-```sh
-make build-installer IMG=<some-registry>/cheap-man-ha-store:tag
+# Run tests
+make test
+
+# Run locally
+make run
 ```
 
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
+### Project Structure
 
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/cheap-man-ha-store/<tag or branch>/dist/install.yaml
+```
+├── api/v1alpha1/           # API types and CRD definitions
+├── internal/controller/     # Controller implementation
+├── config/                 # Kubernetes manifests
+│   ├── crd/               # Custom Resource Definitions
+│   ├── rbac/              # RBAC configuration
+│   └── samples/           # Example configurations
+└── cmd/                   # Main application entry point
 ```
 
-### By providing a Helm Chart
+## Monitoring
 
-1. Build the chart using the optional helm plugin
+The operator provides status information:
 
-```sh
-kubebuilder edit --plugins=helm/v1-alpha
+```bash
+kubectl get pvcbackup database-backup -o yaml
 ```
 
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
+Status fields include:
 
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
+- `managedPVCs`: List of PVCs being managed
+- `lastBackup`: Timestamp of last backup
+- `lastRestore`: Timestamp of last restore
+- `backupStatus`: Current backup status
+- `restoreStatus`: Current restore status
+- `successfulBackups`: Count of successful backups
+- `failedBackups`: Count of failed backups
 
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+## Troubleshooting
 
-**NOTE:** Run `make help` for more information on all potential `make` targets
+### Check Operator Logs
 
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+```bash
+kubectl logs -n cheap-man-ha-store-system deployment/cheap-man-ha-store-controller-manager
+```
 
-## License
+### Verify CRD Installation
 
-Copyright 2025.
+```bash
+kubectl get crd pvcbackups.storage.cheap-man-ha-store.com
+```
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+### Check RBAC Permissions
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+```bash
+kubectl auth can-i create pvcbackups --as=system:serviceaccount:cheap-man-ha-store-system:cheap-man-ha-store-controller-manager
+```
