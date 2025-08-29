@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -33,15 +34,11 @@ type BackupTarget struct {
 	// +required
 	Priority int32 `json:"priority"`
 
-	// Type of backup target (s3, nfs, etc.)
+	// Restic configuration for backup targets
 	// +required
-	Type string `json:"type"`
+	Restic *ResticConfig `json:"restic"`
 
-	// S3 configuration for S3-type targets
-	// +optional
-	S3 *S3Config `json:"s3,omitempty"`
-
-	// NFS configuration for NFS-type targets
+	// NFS configuration for dynamic mounting (optional)
 	// +optional
 	NFS *NFSConfig `json:"nfs,omitempty"`
 
@@ -50,47 +47,7 @@ type BackupTarget struct {
 	Retention *RetentionPolicy `json:"retention,omitempty"`
 }
 
-// S3Config defines S3 backup target configuration
-type S3Config struct {
-	// S3 bucket name
-	// +required
-	Bucket string `json:"bucket"`
 
-	// S3 region
-	// +required
-	Region string `json:"region"`
-
-	// S3 endpoint (for custom S3-compatible storage)
-	// +optional
-	Endpoint string `json:"endpoint,omitempty"`
-
-	// S3 access key ID
-	// +required
-	AccessKeyID string `json:"accessKeyID"`
-
-	// S3 secret access key
-	// +required
-	SecretAccessKey string `json:"secretAccessKey"`
-
-	// S3 path prefix
-	// +optional
-	PathPrefix string `json:"pathPrefix,omitempty"`
-}
-
-// NFSConfig defines NFS backup target configuration
-type NFSConfig struct {
-	// NFS server address
-	// +required
-	Server string `json:"server"`
-
-	// NFS export path
-	// +required
-	Path string `json:"path"`
-
-	// NFS mount options
-	// +optional
-	MountOptions []string `json:"mountOptions,omitempty"`
-}
 
 // RetentionPolicy defines how many snapshots to keep
 type RetentionPolicy struct {
@@ -177,17 +134,48 @@ type InitContainerConfig struct {
 
 // ResticConfig defines restic backup configuration
 type ResticConfig struct {
-	// Restic repository
+	// Restic repository URL (e.g., s3:s3.amazonaws.com/bucket, nfs:/mnt/backup, sftp:user@host:/path)
 	// +required
 	Repository string `json:"repository"`
 
-	// Restic password
+	// Restic password for repository encryption
 	// +required
 	Password string `json:"password"`
+
+	// Environment variables for authentication (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
 
 	// Additional restic flags
 	// +optional
 	Flags []string `json:"flags,omitempty"`
+
+	// Backup tags for organization
+	// +optional
+	Tags []string `json:"tags,omitempty"`
+
+	// Hostname for backup identification
+	// +optional
+	Host string `json:"host,omitempty"`
+}
+
+// NFSConfig defines NFS mount configuration for dynamic mounting
+type NFSConfig struct {
+	// NFS server address
+	// +required
+	Server string `json:"server"`
+
+	// NFS export path
+	// +required
+	Path string `json:"path"`
+
+	// NFS mount options
+	// +optional
+	MountOptions []string `json:"mountOptions,omitempty"`
+
+	// Mount point in the container
+	// +optional
+	MountPath string `json:"mountPath,omitempty"`
 }
 
 // PVCBackupStatus defines the observed state of PVCBackup.

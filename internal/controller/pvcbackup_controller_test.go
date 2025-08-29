@@ -37,12 +37,12 @@ var _ = Describe("PVCBackup Controller", func() {
 					Spec: storagev1alpha1.PVCBackupSpec{
 						BackupTargets: []storagev1alpha1.BackupTarget{
 							{
-								Name:     "test-s3",
-								Type:     "s3",
+								Name:     "test-restic",
 								Priority: 1,
-								S3: &storagev1alpha1.S3Config{
-									Bucket: "test-bucket",
-									Region: "us-west-2",
+								Restic: &storagev1alpha1.ResticConfig{
+									Repository: "local:/tmp/test-backup",
+									Password:   "test-password",
+									Tags:       []string{"test", "example"},
 								},
 							},
 						},

@@ -1,239 +1,296 @@
 # PVC Backup Operator
 
-A Kubernetes operator for automated PVC backup and restore operations with support for multiple backup targets and priorities.
+Kubernetes operator for automated PVC backup/restore with Restic. Simple, secure, and efficient.
 
-## Features
+## What it does
 
-- **Automated PVC Backup**: Schedule-based backups using cron expressions
-- **Multiple Backup Targets**: Support for S3 and NFS with priority-based selection
-- **Data Integrity**: Option to stop pods during backup for consistent snapshots
-- **Automatic Restore**: Restore new PVCs from existing backups
-- **Init Container Support**: Wait for restore completion before starting applications
-- **Retention Policies**: Configurable snapshot retention per target
-- **Health Checks**: Wait for pod health before backup operations
-- **Restic Integration**: Plain data backup using restic for manual intervention
+- **Automated backups** on schedule (cron-based)
+- **Multiple targets** (S3, NFS, SFTP, Azure, GCS, etc.)
+- **Global deduplication** and compression
+- **End-to-end encryption**
+- **Auto-restore** for new PVCs
+- **Smart retention** policies
 
-## Architecture
-
-The operator watches for:
-
-- `PVCBackup` custom resources
-- `PersistentVolumeClaim` objects
-- `Pod` objects using PVCs
-
-## Installation
-
-### Prerequisites
-
-- Kubernetes 1.24+
-- VolumeSnapshot CRD (for volume snapshots)
-- S3-compatible storage or NFS server
-
-### Deploy the Operator
+## Quick Start
 
 ```bash
-# Install CRDs
-make install
+# Install
+make install && make deploy
 
-# Deploy the operator
-make deploy
-
-# Or build and run locally
+# Or run locally
 make run
 ```
 
-## Usage
-
-### Basic PVCBackup Configuration
+## Example Config
 
 ```yaml
 apiVersion: storage.cheap-man-ha-store.com/v1alpha1
 kind: PVCBackup
 metadata:
-  name: database-backup
-  namespace: default
+  name: db-backup
 spec:
-  # Select PVCs to backup
   pvcSelector:
     labelSelector:
       matchLabels:
-        backup.enabled: "true"
         app: database
-    namespaces:
-      - default
-      - database
+        backup: "true"
+    namespaces: [default, production]
 
-  # Backup targets with priorities
   backupTargets:
-    - name: nfs-primary
+    - name: s3-primary
       priority: 1
-      type: nfs
-      nfs:
-        server: "192.168.1.100"
-        path: "/backups"
-      retention:
-        maxSnapshots: 10
-        maxAge: "168h"
+      restic:
+        repository: "s3:s3.amazonaws.com/my-bucket"
+        password: "your-password"
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            value: "your-key"
+          - name: AWS_SECRET_ACCESS_KEY
+            value: "your-secret"
+        tags: [production, daily]
 
-    - name: s3-secondary
+    - name: nfs-local
       priority: 2
-      type: s3
-      s3:
-        bucket: "pvc-backups"
-        region: "us-west-2"
-        accessKeyID: "your-access-key"
-        secretAccessKey: "your-secret-key"
-      retention:
-        maxSnapshots: 30
+      restic:
+        repository: "local:/mnt/backup"
+        password: "your-password"
+        flags: ["--no-lock"]
 
-  # Backup schedule
   schedule:
     cron: "0 2 * * *" # Daily at 2 AM
-    stopPods: true # Stop pods for data integrity
     waitForHealthy: true
 
-  # Enable automatic restore
   autoRestore: true
-
-  # Init container for restore waiting
-  initContainer:
-    image: "busybox:1.35"
-    command: ["/bin/sh"]
-    args:
-      - "-c"
-      - "echo 'Waiting for PVC restore...' && sleep 30"
+  retention:
+    maxSnapshots: 30
+    maxAge: "90d"
 ```
 
-### PVC Selection
+## Repository Types
 
-The operator supports multiple ways to select PVCs:
+### S3/S3-Compatible
 
-1. **Label Selector**: Use Kubernetes label selectors
-2. **Namespace Filtering**: Specify namespaces to monitor
-3. **Name Filtering**: List specific PVC names
+```yaml
+backupTargets:
+  - name: aws-s3
+    priority: 1
+    restic:
+      repository: "s3:s3.amazonaws.com/bucket-name"
+      password: "your-password"
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "your-key"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "your-secret"
+        - name: AWS_DEFAULT_REGION
+          value: "us-west-2"
+      tags: [aws, production]
 
-### Backup Targets
+  - name: minio
+    priority: 2
+    restic:
+      repository: "s3:minio.example.com:9000/bucket-name"
+      password: "your-password"
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "minio-key"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "minio-secret"
+        - name: AWS_ENDPOINT
+          value: "http://minio.example.com:9000"
+      tags: [minio, local]
+```
 
-#### NFS Target
+### NFS/Local Storage
 
 ```yaml
 backupTargets:
   - name: nfs-backup
     priority: 1
-    type: nfs
-    nfs:
-      server: "192.168.1.100"
-      path: "/backups"
-      mountOptions:
-        - "nfsvers=4"
-        - "soft"
+    restic:
+      repository: "local:/mnt/nfs/backup/restic-repo"
+      password: "your-password"
+      flags: ["--no-lock"] # Important for NFS
+      tags: [nfs, local]
+
+  - name: local-fast
+    priority: 2
+    restic:
+      repository: "local:/mnt/fast-ssd/backup"
+      password: "your-password"
+      tags: [local, fast-access]
 ```
 
-#### S3 Target
+### NFS Server Examples
 
 ```yaml
 backupTargets:
-  - name: s3-backup
+  - name: nfs-primary
+    priority: 1
+    restic:
+      repository: "local:/mnt/nfs-primary/backup"
+      password: "your-password"
+      flags: ["--no-lock"]
+      tags: [nfs, primary]
+    # Mount this NFS in your pod:
+    # - name: nfs-backup
+    #   mountPath: /mnt/nfs-primary
+    #   nfs:
+    #     server: nfs.example.com
+    #     path: /backup
+
+  - name: nfs-secondary
     priority: 2
-    type: s3
-    s3:
-      bucket: "pvc-backups"
-      region: "us-west-2"
-      endpoint: "https://s3.us-west-2.amazonaws.com"
-      accessKeyID: "your-key"
-      secretAccessKey: "your-secret"
-      pathPrefix: "backups"
+    restic:
+      repository: "local:/mnt/nfs-secondary/backup"
+      password: "your-password"
+      flags: ["--no-lock"]
+      tags: [nfs, secondary]
+    # Mount this NFS in your pod:
+    # - name: nfs-backup-2
+    #   mountPath: /mnt/nfs-secondary
+    #   nfs:
+    #     server: nfs2.example.com
+    #     path: /backup
 ```
 
-### Retention Policies
+**Note**: NFS repositories use `local:/mnt/path` because Restic sees the mounted NFS as a local directory. The actual NFS server and path are configured in the Kubernetes volume mount.
 
-Configure how many snapshots to keep:
+### Dynamic NFS Mounting
+
+For better flexibility, the operator can dynamically mount NFS shares when needed:
 
 ```yaml
-retention:
-  maxSnapshots: 10 # Keep max 10 snapshots
-  maxAge: "168h" # Keep snapshots for 7 days
+backupTargets:
+  - name: nfs-dynamic
+    priority: 1
+    restic:
+      repository: "local:/mnt/backup"
+      password: "your-password"
+      flags: ["--no-lock"]
+      tags: [nfs, dynamic]
+    nfs:
+      server: "nfs.example.com"
+      path: "/backup"
+      mountOptions: ["nfsvers=4", "soft"]
 ```
 
-### Automatic Restore
+**Note**: The operator will automatically mount/unmount NFS shares as needed, so you don't need to pre-mount all possible NFS locations in your deployment.
 
-Enable automatic restore for new PVCs:
+### How Dynamic NFS Mounting Works
+
+1. **No Pre-mounting**: The operator doesn't need NFS shares mounted at startup
+2. **On-Demand Mounting**: When a backup starts, the operator mounts the NFS share to `/mnt/backup`
+3. **Restic Access**: Restic sees the mounted NFS as a local directory at `local:/mnt/backup`
+4. **Auto-Unmounting**: After backup completes, the NFS share is unmounted
+5. **Multiple Targets**: Each NFS target can have different servers, paths, and mount options
+
+This approach gives you:
+
+- **Flexibility**: Add/remove NFS servers without operator restarts
+- **Efficiency**: Only mount NFS when actually backing up
+- **Scalability**: Support many NFS targets without deployment complexity
+- **Security**: NFS credentials can be managed per target
+
+### Implementation Details
+
+The operator now includes:
+
+- **NFSMounter**: Creates temporary pods to mount NFS shares using Kubernetes volumes
+- **Automatic Cleanup**: Ensures NFS mount pods are deleted after operations
+- **Kubernetes Native**: Uses standard Kubernetes patterns instead of elevated capabilities
+- **Error Handling**: Graceful fallback if NFS mounting fails
+- **Repository Path Resolution**: Automatically adjusts Restic repository paths for mounted NFS
+
+**Note**: The operator creates temporary privileged pods for NFS mounting, eliminating the need for elevated capabilities in the main operator container.
+
+## Advanced Options
+
+### Custom Flags & Performance
 
 ```yaml
-spec:
-  autoRestore: true
-
-  # PVCs with this label will be automatically restored
-  pvcSelector:
-    labelSelector:
-      matchLabels:
-        backup.restore: "true"
+backupTargets:
+  - name: optimized-backup
+    priority: 1
+    restic:
+      repository: "s3:s3.amazonaws.com/my-bucket"
+      password: "your-password"
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "your-key"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "your-secret"
+      flags:
+        - "--compression=auto"
+        - "--parallel=4"
+        - "--exclude=*.tmp"
+        - "--exclude=*.log"
+        - "--exclude=node_modules"
+      tags: [production, optimized]
+      host: "k8s-cluster-1"
 ```
+
+### Multi-Cloud Strategy
+
+```yaml
+backupTargets:
+  - name: aws-primary
+    priority: 1
+    restic:
+      repository: "s3:s3.amazonaws.com/primary"
+      password: "primary-password"
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "primary-key"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "primary-secret"
+      tags: [primary, production]
+
+  - name: local-archive
+    priority: 3
+    restic:
+      repository: "local:/mnt/archive/backup"
+      password: "archive-password"
+      tags: [local, long-term, archive]
+```
+
+## Prerequisites
+
+- Kubernetes 1.24+
+- VolumeSnapshot CRD
+- Restic binary in container
+- NFS client tools available in cluster (for temporary mount pods)
 
 ## Development
 
-### Building
+```bash
+make manifests  # Generate CRDs
+make build      # Build binary
+make test       # Run tests
+make run        # Run locally
+```
+
+## Project Structure
+
+```
+├── api/v1alpha1/        # API types
+├── internal/controller/  # Main logic
+├── config/              # K8s manifests
+└── cmd/                 # Entry point
+```
+
+## Status & Monitoring
 
 ```bash
-# Generate manifests
-make manifests
+# Check status
+kubectl get pvcbackup db-backup -o yaml
 
-# Build the operator
-make build
-
-# Run tests
-make test
-
-# Run locally
-make run
-```
-
-### Project Structure
-
-```
-├── api/v1alpha1/           # API types and CRD definitions
-├── internal/controller/     # Controller implementation
-├── config/                 # Kubernetes manifests
-│   ├── crd/               # Custom Resource Definitions
-│   ├── rbac/              # RBAC configuration
-│   └── samples/           # Example configurations
-└── cmd/                   # Main application entry point
-```
-
-## Monitoring
-
-The operator provides status information:
-
-```bash
-kubectl get pvcbackup database-backup -o yaml
-```
-
-Status fields include:
-
-- `managedPVCs`: List of PVCs being managed
-- `lastBackup`: Timestamp of last backup
-- `lastRestore`: Timestamp of last restore
-- `backupStatus`: Current backup status
-- `restoreStatus`: Current restore status
-- `successfulBackups`: Count of successful backups
-- `failedBackups`: Count of failed backups
-
-## Troubleshooting
-
-### Check Operator Logs
-
-```bash
+# View logs
 kubectl logs -n cheap-man-ha-store-system deployment/cheap-man-ha-store-controller-manager
 ```
 
-### Verify CRD Installation
+## Need Help?
 
-```bash
-kubectl get crd pvcbackups.storage.cheap-man-ha-store.com
-```
-
-### Check RBAC Permissions
-
-```bash
-kubectl auth can-i create pvcbackups --as=system:serviceaccount:cheap-man-ha-store-system:cheap-man-ha-store-controller-manager
-```
+- Check [Restic docs](https://restic.readthedocs.io/)
+- Look at sample configs in `config/samples/`
+- Open an issue on GitHub

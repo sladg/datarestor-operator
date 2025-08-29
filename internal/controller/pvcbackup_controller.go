@@ -29,19 +29,17 @@ import (
 // NewPVCBackupReconciler creates a new PVCBackupReconciler
 func NewPVCBackupReconciler(client client.Client, scheme *runtime.Scheme) *PVCBackupReconciler {
 	return &PVCBackupReconciler{
-		Client:    client,
-		Scheme:    scheme,
-		s3Client:  NewS3Client(),
-		nfsClient: NewNFSClient(),
+		Client:       client,
+		Scheme:       scheme,
+		resticClient: NewResticClient(client),
 	}
 }
 
 // PVCBackupReconciler reconciles a PVCBackup object
 type PVCBackupReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	s3Client  *S3Client
-	nfsClient *NFSClient
+	Scheme       *runtime.Scheme
+	resticClient *ResticClient
 }
 
 // +kubebuilder:rbac:groups=storage.cheap-man-ha-store.com,resources=pvcbackups,verbs=get;list;watch;create;update;patch;delete
@@ -667,14 +665,11 @@ func (r *PVCBackupReconciler) createVolumeSnapshot(ctx context.Context, pvcBacku
 
 // uploadToBackupTarget uploads backup data to the specified target
 func (r *PVCBackupReconciler) uploadToBackupTarget(ctx context.Context, target storagev1alpha1.BackupTarget, backupData interface{}, pvc corev1.PersistentVolumeClaim) error {
-	switch target.Type {
-	case "s3":
-		return r.s3Client.UploadBackup(ctx, target.S3, backupData, pvc)
-	case "nfs":
-		return r.nfsClient.UploadBackup(ctx, target.NFS, backupData, pvc)
-	default:
-		return fmt.Errorf("unsupported backup target type: %s", target.Type)
+	if target.Restic == nil {
+		return fmt.Errorf("restic configuration is required")
 	}
+
+	return r.resticClient.UploadBackup(ctx, target, backupData, pvc)
 }
 
 // cleanupOldSnapshots cleans up old snapshots based on retention policy
@@ -700,42 +695,14 @@ func (r *PVCBackupReconciler) cleanupOldSnapshots(ctx context.Context, pvcBackup
 			continue
 		}
 
-		switch target.Type {
-		case "s3":
-			// Clean up S3 backups
-			if err := r.s3Client.CleanupBackups(ctx, target.S3, pvc, target.Retention); err != nil {
-				logger.Error(err, "Failed to cleanup S3 backups", "target", target.Name)
-			}
-		case "nfs":
-			// Clean up NFS backups
-			if err := r.nfsClient.CleanupBackups(ctx, target.NFS, pvc, target.Retention); err != nil {
-				logger.Error(err, "Failed to cleanup NFS backups", "target", target.Name)
-			}
-		default:
-			// Clean up VolumeSnapshots for other targets
-			targetSnapshots := r.filterSnapshotsForTarget(snapshots.Items, target)
+		if target.Restic == nil {
+			logger.Error(fmt.Errorf("restic configuration missing"), "Skipping target with missing restic config", "target", target.Name)
+			continue
+		}
 
-			// Check max snapshots
-			if target.Retention.MaxSnapshots > 0 && len(targetSnapshots) > int(target.Retention.MaxSnapshots) {
-				snapshotsToDelete := targetSnapshots[:len(targetSnapshots)-int(target.Retention.MaxSnapshots)]
-				if err := r.deleteSnapshots(ctx, snapshotsToDelete); err != nil {
-					logger.Error(err, "Failed to delete old snapshots", "target", target.Name)
-				}
-			}
-
-			// Check max age
-			if target.Retention.MaxAge != nil {
-				cutoffTime := time.Now().Add(-target.Retention.MaxAge.Duration)
-				for _, snapshot := range targetSnapshots {
-					if snapshot.CreationTimestamp.Before(&metav1.Time{Time: cutoffTime}) {
-						if err := r.Delete(ctx, &snapshot); err != nil {
-							logger.Error(err, "Failed to delete old snapshot", "snapshot", snapshot.Name)
-						} else {
-							logger.Info("Deleted old snapshot", "snapshot", snapshot.Name, "age", time.Since(snapshot.CreationTimestamp.Time))
-						}
-					}
-				}
-			}
+		// Clean up Restic backups
+		if err := r.resticClient.CleanupBackups(ctx, target, pvc, target.Retention); err != nil {
+			logger.Error(err, "Failed to cleanup Restic backups", "target", target.Name)
 		}
 	}
 
@@ -795,38 +762,23 @@ func (r *PVCBackupReconciler) findBestBackup(ctx context.Context, pvcBackup *sto
 
 // findBackupInTarget searches for backups in a specific target
 func (r *PVCBackupReconciler) findBackupInTarget(ctx context.Context, target storagev1alpha1.BackupTarget, pvc corev1.PersistentVolumeClaim) (interface{}, error) {
-	switch target.Type {
-	case "s3":
-		return r.s3Client.FindBackup(ctx, target.S3, pvc)
-	case "nfs":
-		return r.nfsClient.FindBackup(ctx, target.NFS, pvc)
-	default:
-		return nil, fmt.Errorf("unsupported target type: %s", target.Type)
+	if target.Restic == nil {
+		return nil, fmt.Errorf("restic configuration is required")
 	}
+
+	return r.resticClient.FindBackup(ctx, target, pvc)
 }
 
 // restoreData restores data to a PVC from backup
 func (r *PVCBackupReconciler) restoreData(ctx context.Context, pvc corev1.PersistentVolumeClaim, backupData interface{}) error {
 	// Check backup data type and restore accordingly
-	switch backupData.(type) {
+	switch data := backupData.(type) {
 	case *snapshotv1.VolumeSnapshot:
-		return r.restoreFromSnapshot(ctx, pvc, backupData.(*snapshotv1.VolumeSnapshot))
-	case []byte: // For S3 backup
-		return r.restoreFromS3(ctx, pvc, backupData.([]byte))
-	case map[string]string:
-		backupInfo := backupData.(map[string]string)
-		switch backupInfo["type"] {
-		case "s3":
-			// For S3, we need to download the actual backup data first
-			// This is a placeholder - in production you'd download from S3
-			return fmt.Errorf("S3 restore from map not implemented - need actual backup data")
-		case "nfs":
-			return r.restoreFromNFS(ctx, pvc, backupInfo)
-		default:
-			return fmt.Errorf("unsupported backup type: %s", backupInfo["type"])
-		}
+		return r.restoreFromSnapshot(ctx, pvc, data)
+	case *BackupInfo: // For Restic backup
+		return r.restoreFromRestic(ctx, pvc, data)
 	default:
-		return fmt.Errorf("unknown backup data type: %T", backupData)
+		return fmt.Errorf("unsupported backup data type: %T, only VolumeSnapshot and Restic backups are supported", backupData)
 	}
 }
 
@@ -846,39 +798,25 @@ func (r *PVCBackupReconciler) restoreFromSnapshot(ctx context.Context, pvc corev
 	return nil
 }
 
-// restoreFromS3 restores data from S3 backup
-func (r *PVCBackupReconciler) restoreFromS3(ctx context.Context, pvc corev1.PersistentVolumeClaim, backupData []byte) error {
+
+
+// restoreFromRestic restores data from a Restic backup
+func (r *PVCBackupReconciler) restoreFromRestic(ctx context.Context, pvc corev1.PersistentVolumeClaim, backupInfo *BackupInfo) error {
 	logger := log.FromContext(ctx)
 
-	logger.Info("Restoring from S3 backup", "pvc", pvc.Name, "dataSize", len(backupData))
-
-	// This is a placeholder implementation for the actual restore logic
-	// In production, you would:
-	// 1. Parse the backup data (could be tar.gz, raw bytes, etc.)
-	// 2. Mount the PVC or create a temporary pod
-	// 3. Extract and restore the data to the PVC
-	// 4. Verify the restore was successful
-
-	// For now, we'll simulate the restore process
-	time.Sleep(2 * time.Second)
-
-	logger.Info("Successfully restored from S3", "pvc", pvc.Name, "dataSize", len(backupData))
-	return nil
-}
-
-// restoreFromNFS restores data from NFS backup
-func (r *PVCBackupReconciler) restoreFromNFS(ctx context.Context, pvc corev1.PersistentVolumeClaim, backupInfo map[string]string) error {
-	logger := log.FromContext(ctx)
-
-	logger.Info("Restoring from NFS", "server", backupInfo["server"], "path", backupInfo["path"], "pvc", pvc.Name)
+	logger.Info("Restoring from Restic backup", "backupID", backupInfo.ID, "pvc", pvc.Name)
 
 	// This is a placeholder implementation
-	// In production, you would mount the NFS share and copy files to the PVC
+	// In production, you would:
+	// 1. Find the Restic target configuration for this PVC
+	// 2. Use the ResticClient to restore the backup
+	// 3. Mount the PVC or create a temporary pod
+	// 4. Restore the data to the PVC
 
 	// Simulate restore process
 	time.Sleep(2 * time.Second)
 
-	logger.Info("Successfully restored from NFS", "pvc", pvc.Name)
+	logger.Info("Successfully restored from Restic backup", "backupID", backupInfo.ID, "pvc", pvc.Name)
 	return nil
 }
 
@@ -1104,8 +1042,13 @@ func (r *PVCBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(r.findObjectsForPod),
 		).
-		Named("pvcbackup").
 		Complete(r)
+}
+
+// Cleanup handles cleanup when the controller is shutting down
+func (r *PVCBackupReconciler) Cleanup() error {
+	ctx := context.Background()
+	return r.resticClient.nfsMounter.CleanupAll(ctx)
 }
 
 // findObjectsForPVC finds PVCBackup objects for a given PVC
