@@ -32,7 +32,6 @@ func LoggerFrom(ctx context.Context, component string) *Logger {
 // Logger wraps logr.Logger to provide consistent logging patterns
 type Logger struct {
 	logger logr.Logger
-	fields map[string]interface{}
 }
 
 // WithPVC adds PVC information to the logger

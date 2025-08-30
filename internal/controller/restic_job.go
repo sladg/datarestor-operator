@@ -440,83 +440,32 @@ func (r *ResticJob) getBackupsFromBackupJobs(ctx context.Context, pvc corev1.Per
 	return latestBackupJob.Status.ResticID, nil
 }
 
-// FindLatestBackup finds the latest backup for a PVC using both BackupJob and Restic resources
-// This supports disaster recovery scenarios where the cluster state may be missing
-func (r *ResticJob) FindLatestBackup(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim) (string, error) {
-	logger := LoggerFrom(ctx, "restic").
-		WithPVC(pvc)
-
-	if pvcBackup != nil {
-		logger = logger.WithValues("backupconfig", pvcBackup.Name)
-	}
-
+// FindLatestBackup finds the latest backup for a PVC
+// First tries BackupJobs, then falls back to querying Restic directly using provided backup targets
+func (r *ResticJob) FindLatestBackup(ctx context.Context, pvc corev1.PersistentVolumeClaim, backupTargets ...backupv1alpha1.BackupTarget) (string, error) {
+	logger := LoggerFrom(ctx, "restic").WithPVC(pvc)
 	logger.Starting("find latest backup")
 
-	// Try to find backup from BackupJobs first (normal operation)
-	backupFromJobs, jobErr := r.getBackupsFromBackupJobs(ctx, pvc)
-	if jobErr == nil && backupFromJobs != "" {
-		logger.WithValues("backup_id", backupFromJobs, "source", "BackupJobs").Debug("Found backup from BackupJobs")
-		return backupFromJobs, nil
+	// Try BackupJobs first (fastest, no external calls)
+	if backupID, err := r.getBackupsFromBackupJobs(ctx, pvc); err == nil && backupID != "" {
+		logger.WithValues("backup_id", backupID, "source", "BackupJobs").Debug("Found backup from BackupJobs")
+		return backupID, nil
 	}
-	logger.WithValues("error", jobErr).Debug("Failed to get backup from BackupJobs")
 
-	// Try to find backup from Restic directly (disaster recovery)
-	if pvcBackup != nil {
-		backupFromRestic, resticErr := r.getBackupsFromRestic(ctx, pvcBackup, pvc)
-		if resticErr == nil && backupFromRestic != "" {
-			logger.WithValues("backup_id", backupFromRestic, "source", "Restic").Debug("Found backup from Restic")
-			return backupFromRestic, nil
+	// Fall back to querying Restic directly if backup targets provided
+	if len(backupTargets) > 0 {
+		tempBackupConfig := &backupv1alpha1.BackupConfig{
+			Spec: backupv1alpha1.BackupConfigSpec{
+				BackupTargets: backupTargets,
+			},
 		}
-		logger.WithValues("error", resticErr).Debug("Failed to get backup from Restic")
-	} else {
-		logger.Debug("No BackupConfig provided, skipping Restic direct query")
+		if backupID, err := r.getBackupsFromRestic(ctx, tempBackupConfig, pvc); err == nil && backupID != "" {
+			logger.WithValues("backup_id", backupID, "source", "Restic").Debug("Found backup from Restic")
+			return backupID, nil
+		}
 	}
 
-	// No backups found - this is normal for newly created PVCs
-	logger.Debug("No backups found (normal for new PVCs)")
-	return "", nil
-}
-
-// FindLatestBackupForDisasterRecovery finds the latest backup for a PVC when no BackupConfig resource is available
-// This is specifically for disaster recovery scenarios where the cluster state is missing
-func (r *ResticJob) FindLatestBackupForDisasterRecovery(ctx context.Context, pvc corev1.PersistentVolumeClaim, backupTargets []backupv1alpha1.BackupTarget) (string, error) {
-	logger := LoggerFrom(ctx, "restic").
-		WithPVC(pvc).
-		WithValues("mode", "disaster-recovery")
-
-	logger.Starting("find latest backup for disaster recovery")
-
-	// Try BackupJobs first (might exist even if BackupConfig is gone)
-	backupFromJobs, jobErr := r.getBackupsFromBackupJobs(ctx, pvc)
-	if backupFromJobs != "" {
-		logger.WithValues(
-			"backup_id", backupFromJobs,
-			"source", "BackupJobs",
-		).Debug("Found backup from existing BackupJobs")
-		return backupFromJobs, nil
-	}
-
-	logger.WithValues("error", jobErr).Debug("No BackupJobs found, querying Restic directly")
-
-	// Create a temporary BackupConfig structure for Restic queries
-	tempBackupConfig := &backupv1alpha1.BackupConfig{
-		Spec: backupv1alpha1.BackupConfigSpec{
-			BackupTargets: backupTargets,
-		},
-	}
-
-	// Query Restic directly using provided targets
-	backupFromRestic, resticErr := r.getBackupsFromRestic(ctx, tempBackupConfig, pvc)
-	if backupFromRestic != "" {
-		logger.WithValues(
-			"backup_id", backupFromRestic,
-			"source", "Restic-direct",
-		).Debug("Found backup from Restic")
-		return backupFromRestic, nil
-	}
-
-	// No backups found - this could be normal for new PVCs or actual disaster recovery failure
-	logger.WithValues("restic_error", resticErr).Debug("No backups found in disaster recovery mode")
+	logger.Debug("No backups found")
 	return "", nil
 }
 

@@ -50,8 +50,6 @@ type BackupConfigReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=snapshot.storage.k8s.io,resources=volumesnapshots/status,verbs=get;update;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -75,13 +73,13 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Check if BackupConfig is being deleted
 	if !pvcBackup.DeletionTimestamp.IsZero() {
-		return r.handleDeletion(ctx, pvcBackup)
+		return r.handleBackupConfigDeletion(ctx, pvcBackup)
 	}
 
 	// Add finalizer if not present
-	if !containsFinalizer(pvcBackup, "backupconfig.backup.autorestore-backup-operator.com/finalizer") {
+	if !containsFinalizer(pvcBackup, BackupConfigFinalizer) {
 		logger.Starting("add finalizer")
-		pvcBackup.Finalizers = append(pvcBackup.Finalizers, "backupconfig.backup.autorestore-backup-operator.com/finalizer")
+		pvcBackup.Finalizers = append(pvcBackup.Finalizers, BackupConfigFinalizer)
 		if err := r.Update(ctx, pvcBackup); err != nil {
 			logger.Failed("add finalizer", err)
 			return ctrl.Result{}, err
@@ -180,13 +178,9 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			Debug("No matching PVCs found")
 	}
 
-	// Schedule next reconciliation based on backup schedule
+	// Schedule next reconciliation with a default interval
 	logger.Starting("calculate next reconcile")
-	nextReconcile, err := r.calculateNextReconcile(pvcBackup)
-	if err != nil {
-		logger.Failed("calculate next reconcile", err)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
+	nextReconcile := 5 * time.Minute // Default reconcile interval
 	logger.WithValues("requeueAfter", nextReconcile).Debug("Next reconciliation scheduled")
 	return ctrl.Result{RequeueAfter: nextReconcile}, nil
 }

@@ -2,10 +2,7 @@ package controller
 
 import (
 	"context"
-	"fmt"
-	"time"
 
-	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -91,130 +88,6 @@ func (r *BackupConfigReconciler) findMatchingPVCs(ctx context.Context, pvcBackup
 
 	logger.WithValues("count", len(pvcs)).Completed("find matching PVCs")
 	return pvcs, nil
-}
-
-func (r *BackupConfigReconciler) isPVCHealthy(ctx context.Context, pvc corev1.PersistentVolumeClaim) bool {
-	logger := LoggerFrom(ctx, "pvc").
-		WithValues("pvc", pvc.Name)
-
-	logger.Starting("check health")
-
-	if pvc.Status.Phase != corev1.ClaimBound {
-		logger.WithValues("phase", pvc.Status.Phase).Debug("PVC is not bound")
-		return false
-	}
-
-	var pods corev1.PodList
-	if err := r.List(ctx, &pods, client.MatchingFields{"spec.volumes.persistentVolumeClaim.claimName": pvc.Name}); err != nil {
-		logger.Failed("list pods using PVC", err)
-		return false
-	}
-
-	if len(pods.Items) == 0 {
-		logger.Debug("No pods using PVC")
-		logger.Completed("check health")
-		return true // PVC is healthy if no pods are using it
-	}
-
-	for _, pod := range pods.Items {
-		podLogger := logger.WithValues("pod", pod.Name)
-		if !r.isPodHealthy(&pod) {
-			podLogger.Debug("Pod is not healthy")
-			return false
-		}
-	}
-
-	logger.Completed("check health")
-	return true
-}
-
-// waitForSnapshotReady waits for the VolumeSnapshot to be ready
-func (r *BackupConfigReconciler) waitForSnapshotReady(ctx context.Context, snapshot *snapshotv1.VolumeSnapshot) error {
-	logger := LoggerFrom(ctx, "snapshot").
-		WithValues("name", snapshot.Name, "namespace", snapshot.Namespace)
-
-	logger.Starting("wait for ready")
-
-	// Wait up to 5 minutes for snapshot to be ready
-	timeout := time.After(5 * time.Minute)
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-timeout:
-			logger.Failed("wait for ready", fmt.Errorf("timeout"))
-			return fmt.Errorf("timeout waiting for snapshot to be ready: %s", snapshot.Name)
-		case <-ticker.C:
-			// Get the latest snapshot status
-			var currentSnapshot snapshotv1.VolumeSnapshot
-			if err := r.Get(ctx, types.NamespacedName{Name: snapshot.Name, Namespace: snapshot.Namespace}, &currentSnapshot); err != nil {
-				logger.Failed("get snapshot status", err)
-				continue
-			}
-
-			if currentSnapshot.Status != nil && currentSnapshot.Status.ReadyToUse != nil && *currentSnapshot.Status.ReadyToUse {
-				logger.Completed("wait for ready")
-				return nil
-			}
-
-			if currentSnapshot.Status != nil && currentSnapshot.Status.Error != nil {
-				err := fmt.Errorf("snapshot creation failed: %s", *currentSnapshot.Status.Error.Message)
-				logger.Failed("wait for ready", err)
-				return err
-			}
-
-			logger.Debug("Snapshot not ready yet")
-		}
-	}
-}
-
-// createVolumeSnapshot creates a VolumeSnapshot for the PVC
-func (r *BackupConfigReconciler) createVolumeSnapshot(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim) (interface{}, error) {
-	logger := LoggerFrom(ctx, "snapshot").
-		WithPVC(pvc).
-		WithValues("name", pvcBackup.Name)
-
-	logger.Starting("create snapshot")
-
-	// Generate snapshot name
-	snapshotName := fmt.Sprintf("%s-%s-%s", pvc.Name, pvc.Namespace, time.Now().Format("20060102-150405"))
-	logger.WithValues("snapshot", snapshotName).Debug("Generated snapshot name")
-
-	// Create VolumeSnapshot
-	snapshot := &snapshotv1.VolumeSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      snapshotName,
-			Namespace: pvc.Namespace,
-			Labels: map[string]string{
-				"backupconfig.autorestore-backup-operator.com/created-by": pvcBackup.Name,
-				"backupconfig.autorestore-backup-operator.com/pvc-name":   pvc.Name,
-				"backupconfig.autorestore-backup-operator.com/timestamp":  time.Now().Format("20060102-150405"),
-				"backupconfig.autorestore-backup-operator.com/target":     "volumesnapshot",
-			},
-		},
-		Spec: snapshotv1.VolumeSnapshotSpec{
-			Source: snapshotv1.VolumeSnapshotSource{
-				PersistentVolumeClaimName: &pvc.Name,
-			},
-		},
-	}
-
-	if err := r.Create(ctx, snapshot); err != nil {
-		logger.Failed("create snapshot", err)
-		return nil, fmt.Errorf("failed to create VolumeSnapshot: %w", err)
-	}
-
-	logger.Debug("Created VolumeSnapshot")
-
-	// Wait for snapshot to be ready
-	if err := r.waitForSnapshotReady(ctx, snapshot); err != nil {
-		logger.Failed("wait for snapshot ready", err)
-		return nil, fmt.Errorf("snapshot not ready: %w", err)
-	}
-
-	logger.Completed("create snapshot")
-	return snapshot, nil
 }
 
 // findObjectsForPVC finds BackupConfig objects for a given PVC

@@ -80,12 +80,12 @@ func (r *RestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Handle finalizer
 	if restoreJob.DeletionTimestamp != nil {
-		if controllerutil.ContainsFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer") {
+		if controllerutil.ContainsFinalizer(restoreJob, RestoreJobFinalizer) {
 			if err := r.handleCleanup(ctx, restoreJob); err != nil {
 				logger.Failed("cleanup", err)
 				return ctrl.Result{RequeueAfter: time.Minute}, err
 			}
-			controllerutil.RemoveFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer")
+			controllerutil.RemoveFinalizer(restoreJob, RestoreJobFinalizer)
 			if err := r.Update(ctx, restoreJob); err != nil {
 				logger.Failed("remove finalizer", err)
 				return ctrl.Result{}, err
@@ -95,8 +95,8 @@ func (r *RestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer") {
-		controllerutil.AddFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer")
+	if !controllerutil.ContainsFinalizer(restoreJob, RestoreJobFinalizer) {
+		controllerutil.AddFinalizer(restoreJob, RestoreJobFinalizer)
 		if err := r.Update(ctx, restoreJob); err != nil {
 			logger.Failed("add finalizer", err)
 			return ctrl.Result{}, err
@@ -133,7 +133,36 @@ func (r *RestoreJobReconciler) handlePendingRestore(ctx context.Context, restore
 		Namespace: restoreJob.Namespace,
 	}, pvc); err != nil {
 		logger.Failed("get pvc", err)
-		return r.updateStatusWithError(ctx, restoreJob, "Failed to get target PVC", err)
+		return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             fmt.Sprintf("Failed to get target PVC: %v", err),
+			SetCompletionTime: true,
+		})
+	}
+
+	// Handle different restore strategies based on restore type
+	if restoreJob.Spec.RestoreType == "manual" {
+		// Manual restore: Disable resources using the PVC for data integrity
+		logger.Debug("Manual restore: disabling deployments using PVC")
+		if err := enableDeploymentsUsingPVC(ctx, r.Client, *pvc, false); err != nil {
+			logger.Failed("disable deployments", err)
+			return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+				Phase:             "Failed",
+				Error:             fmt.Sprintf("Failed to disable resources: %v", err),
+				SetCompletionTime: true,
+			})
+		}
+	} else {
+		// Automated restore: Add finalizer to PVC to block pod startup
+		logger.Debug("Automated restore: adding finalizer to PVC")
+		if err := r.addPVCFinalizer(ctx, pvc); err != nil {
+			logger.Failed("add PVC finalizer", err)
+			return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+				Phase:             "Failed",
+				Error:             fmt.Sprintf("Failed to add PVC finalizer: %v", err),
+				SetCompletionTime: true,
+			})
+		}
 	}
 
 	// Determine backup ID to restore
@@ -146,69 +175,70 @@ func (r *RestoreJobReconciler) handlePendingRestore(ctx context.Context, restore
 			Namespace: restoreJob.Namespace,
 		}, backupJob); err != nil {
 			logger.Failed("get backup job", err)
-			return r.updateStatusWithError(ctx, restoreJob, "Failed to get referenced backup job", err)
+			return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+				Phase:             "Failed",
+				Error:             fmt.Sprintf("Failed to get referenced backup job: %v", err),
+				SetCompletionTime: true,
+			})
 		}
 		backupID = backupJob.Status.ResticID
 	}
 
 	if backupID == "" {
-		// Find latest backup automatically using disaster recovery approach
-		var err error
-
-		// Try to find a BackupConfig resource for this restore job
-		var pvcBackup *backupv1alpha1.BackupConfig
-		if restoreJob.Spec.BackupConfigRef.Name != "" {
-			pvcBackup = &backupv1alpha1.BackupConfig{}
-			if getErr := r.Get(ctx, client.ObjectKey{
-				Name:      restoreJob.Spec.BackupConfigRef.Name,
-				Namespace: restoreJob.Namespace,
-			}, pvcBackup); getErr != nil {
-				logger.WithValues("error", getErr).Debug("BackupConfig not found, using disaster recovery mode")
-				pvcBackup = nil
-			}
-		}
-
-		if pvcBackup != nil {
-			// Normal mode - use existing BackupConfig
-			backupID, err = r.resticJob.FindLatestBackup(ctx, pvcBackup, *pvc)
-		} else {
-			// Disaster recovery mode - use backup target from restore job spec
-			backupID, err = r.resticJob.FindLatestBackupForDisasterRecovery(ctx, *pvc, []backupv1alpha1.BackupTarget{restoreJob.Spec.BackupTarget})
-		}
+		// Find latest backup - will automatically try BackupJobs first, then fall back to backup target
+		result, err := r.resticJob.FindLatestBackup(ctx, *pvc, restoreJob.Spec.BackupTarget)
 
 		if err != nil {
 			logger.Failed("find latest backup", err)
-			return r.updateStatusWithError(ctx, restoreJob, "Failed to find backup to restore", err)
+			return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+				Phase:             "Failed",
+				Error:             fmt.Sprintf("Failed to find backup to restore: %v", err),
+				SetCompletionTime: true,
+			})
 		}
 
-		if backupID == "" {
-			// No backup found for restore job
-			logger.Debug("No backup found for explicit restore request")
-			var errorMsg string
+		if result == "" {
+			// No backup found - this is expected for new PVCs, complete successfully
+			logger.Debug("No backup found for restore request - completing as NotFound")
+
 			if restoreJob.Spec.RestoreType == "automated" {
-				errorMsg = fmt.Sprintf("no backup found for PVC %s/%s - this is normal for newly created PVCs", pvc.Namespace, pvc.Name)
+				// Automated restore for newly created PVC - this is expected and normal
+				return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+					Phase:             "Completed",
+					RestoreStatus:     "NotFound",
+					SetCompletionTime: true,
+				})
 			} else {
-				errorMsg = fmt.Sprintf("no backup found for PVC %s/%s - manual restore requested but no backup available", pvc.Namespace, pvc.Name)
+				// Manual restore requested but no backup available - this should fail
+				var errorMsg string
+				if len([]backupv1alpha1.BackupTarget{restoreJob.Spec.BackupTarget}) > 0 {
+					errorMsg = fmt.Sprintf("no backup found for PVC %s/%s in disaster recovery mode - backup may not exist or targets may be incorrect", pvc.Namespace, pvc.Name)
+				} else {
+					errorMsg = fmt.Sprintf("no backup found for PVC %s/%s - manual restore requested but no backup available", pvc.Namespace, pvc.Name)
+				}
+				logger.Debug("Manual restore failed - no backup available")
+				return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+					Phase:             "Failed",
+					Error:             fmt.Sprintf("No backup available for restore: %s", errorMsg),
+					RestoreStatus:     "BackupNotFound",
+					SetCompletionTime: true,
+				})
 			}
-			return r.updateStatusWithErrorAndRestoreStatus(ctx, restoreJob, "No backup available for restore", fmt.Errorf("%s", errorMsg), "NotFound")
 		}
 
-		logger.WithValues(
-			"backup_id", backupID,
-			"mode", func() string {
-				if pvcBackup != nil {
-					return "normal"
-				}
-				return "disaster-recovery"
-			}(),
-		).Debug("Found backup for restore")
+		backupID = result
+		logger.WithValues("backup_id", backupID).Debug("Found backup for restore")
 	}
 
 	// Create Kubernetes Job for restore
 	job, err := r.createRestoreJob(ctx, restoreJob, *pvc, backupID)
 	if err != nil {
 		logger.Failed("create restore job", err)
-		return r.updateStatusWithError(ctx, restoreJob, "Failed to create restore job", err)
+		return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             fmt.Sprintf("Failed to create restore job: %v", err),
+			SetCompletionTime: true,
+		})
 	}
 
 	// Update status to Running and set restore status based on type
@@ -244,7 +274,11 @@ func (r *RestoreJobReconciler) handleRunningRestore(ctx context.Context, restore
 		WithValues("name", restoreJob.Name)
 
 	if restoreJob.Status.JobRef == nil {
-		return r.updateStatusWithError(ctx, restoreJob, "No job reference found", fmt.Errorf("missing job reference"))
+		return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             "No job reference found: missing job reference",
+			SetCompletionTime: true,
+		})
 	}
 
 	// Get the restore job
@@ -254,12 +288,29 @@ func (r *RestoreJobReconciler) handleRunningRestore(ctx context.Context, restore
 		Namespace: restoreJob.Namespace,
 	}, job); err != nil {
 		logger.Failed("get job", err)
-		return r.updateStatusWithError(ctx, restoreJob, "Failed to get restore job", err)
+		return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             fmt.Sprintf("Failed to get restore job: %v", err),
+			SetCompletionTime: true,
+		})
 	}
 
 	// Check job status
 	if job.Status.Succeeded > 0 {
 		// Job completed successfully
+		logger.Debug("Restore job completed successfully")
+
+		// Handle post-restore cleanup based on restore type
+		if err := r.handleRestoreCompletion(ctx, restoreJob); err != nil {
+			logger.Failed("handle restore completion", err)
+			return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+				Phase:             "Failed",
+				Error:             fmt.Sprintf("Failed to handle restore completion: %v", err),
+				SetCompletionTime: true,
+			})
+		}
+
+		// Update status to completed
 		now := metav1.Now()
 		restoreJob.Status.Phase = "Completed"
 		restoreJob.Status.CompletionTime = &now
@@ -278,8 +329,20 @@ func (r *RestoreJobReconciler) handleRunningRestore(ctx context.Context, restore
 	}
 
 	if job.Status.Failed > 0 {
-		// Job failed
-		return r.updateStatusWithError(ctx, restoreJob, "Restore job failed", fmt.Errorf("kubernetes job failed"))
+		// Job failed - handle cleanup based on restore type
+		logger.Debug("Restore job failed")
+
+		// Handle post-restore cleanup even on failure
+		if err := r.handleRestoreCompletion(ctx, restoreJob); err != nil {
+			logger.Failed("handle restore failure cleanup", err)
+			// Continue with failure reporting even if cleanup fails
+		}
+
+		return UpdateJobStatus(ctx, r.Client, restoreJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             "Restore job failed: kubernetes job failed",
+			SetCompletionTime: true,
+		})
 	}
 
 	// Job still running
@@ -297,43 +360,6 @@ func (r *RestoreJobReconciler) createRestoreJob(ctx context.Context, restoreJob 
 
 	// Use the shared job creation logic
 	return r.resticJob.createResticJob(ctx, pvc, nil, "restore", args)
-}
-
-// updateStatusWithError updates the status with error information
-func (r *RestoreJobReconciler) updateStatusWithError(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob, message string, err error) (ctrl.Result, error) {
-	logger := LoggerFrom(ctx, "restore-job").
-		WithValues("name", restoreJob.Name)
-
-	now := metav1.Now()
-	restoreJob.Status.Phase = "Failed"
-	restoreJob.Status.CompletionTime = &now
-	restoreJob.Status.Error = fmt.Sprintf("%s: %v", message, err)
-
-	if updateErr := r.Status().Update(ctx, restoreJob); updateErr != nil {
-		logger.Failed("update error status", updateErr)
-		return ctrl.Result{}, updateErr
-	}
-
-	return ctrl.Result{}, err
-}
-
-// updateStatusWithErrorAndRestoreStatus updates the status with error information and restore status
-func (r *RestoreJobReconciler) updateStatusWithErrorAndRestoreStatus(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob, message string, err error, restoreStatus string) (ctrl.Result, error) {
-	logger := LoggerFrom(ctx, "restore-job").
-		WithValues("name", restoreJob.Name)
-
-	now := metav1.Now()
-	restoreJob.Status.Phase = "Failed"
-	restoreJob.Status.RestoreStatus = restoreStatus
-	restoreJob.Status.CompletionTime = &now
-	restoreJob.Status.Error = fmt.Sprintf("%s: %v", message, err)
-
-	if updateErr := r.Status().Update(ctx, restoreJob); updateErr != nil {
-		logger.Failed("update error status", updateErr)
-		return ctrl.Result{}, updateErr
-	}
-
-	return ctrl.Result{}, err
 }
 
 // handleCleanup cleans up resources when the restore job is deleted
@@ -362,6 +388,106 @@ func (r *RestoreJobReconciler) handleCleanup(ctx context.Context, restoreJob *ba
 	}
 
 	logger.Completed("cleanup")
+	return nil
+}
+
+// addPVCFinalizer adds a finalizer to the PVC to block pod startup during automated restore
+func (r *RestoreJobReconciler) addPVCFinalizer(ctx context.Context, pvc *corev1.PersistentVolumeClaim) error {
+	logger := LoggerFrom(ctx, "pvc-finalizer").
+		WithValues("pvc", pvc.Name, "namespace", pvc.Namespace)
+
+	finalizer := PVCRestoreFinalizer
+
+	// Check if finalizer already exists
+	for _, f := range pvc.Finalizers {
+		if f == finalizer {
+			logger.Debug("Finalizer already exists")
+			return nil
+		}
+	}
+
+	logger.Starting("add PVC finalizer")
+
+	// Add the finalizer
+	pvc.Finalizers = append(pvc.Finalizers, finalizer)
+	if err := r.Update(ctx, pvc); err != nil {
+		logger.Failed("add finalizer", err)
+		return err
+	}
+
+	logger.Completed("add PVC finalizer")
+	return nil
+}
+
+// removePVCFinalizer removes the restore finalizer from the PVC
+func (r *RestoreJobReconciler) removePVCFinalizer(ctx context.Context, pvc *corev1.PersistentVolumeClaim) error {
+	logger := LoggerFrom(ctx, "pvc-finalizer").
+		WithValues("pvc", pvc.Name, "namespace", pvc.Namespace)
+
+	finalizer := PVCRestoreFinalizer
+
+	logger.Starting("remove PVC finalizer")
+
+	// Remove the finalizer
+	var newFinalizers []string
+	found := false
+	for _, f := range pvc.Finalizers {
+		if f != finalizer {
+			newFinalizers = append(newFinalizers, f)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		logger.Debug("Finalizer not found")
+		return nil
+	}
+
+	pvc.Finalizers = newFinalizers
+	if err := r.Update(ctx, pvc); err != nil {
+		logger.Failed("remove finalizer", err)
+		return err
+	}
+
+	logger.Completed("remove PVC finalizer")
+	return nil
+}
+
+// handleRestoreCompletion handles post-restore cleanup based on restore type
+func (r *RestoreJobReconciler) handleRestoreCompletion(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob) error {
+	logger := LoggerFrom(ctx, "restore-completion").
+		WithValues("name", restoreJob.Name, "type", restoreJob.Spec.RestoreType)
+
+	logger.Starting("handle restore completion")
+
+	// Get the PVC
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := r.Get(ctx, client.ObjectKey{
+		Name:      restoreJob.Spec.PVCRef.Name,
+		Namespace: restoreJob.Namespace,
+	}, pvc); err != nil {
+		logger.Failed("get pvc", err)
+		return err
+	}
+
+	if restoreJob.Spec.RestoreType == "manual" {
+		// Manual restore: Enable resources that were disabled
+		logger.Debug("Manual restore completion: enabling deployments")
+		if err := enableDeploymentsUsingPVC(ctx, r.Client, *pvc, true); err != nil {
+			logger.Failed("enable deployments", err)
+			return err
+		}
+	} else {
+		// Automated restore: Remove PVC finalizer to allow pod startup
+		logger.Debug("Automated restore completion: removing PVC finalizer")
+		if err := r.removePVCFinalizer(ctx, pvc); err != nil {
+			logger.Failed("remove PVC finalizer", err)
+			return err
+		}
+	}
+
+	logger.Completed("handle restore completion")
 	return nil
 }
 

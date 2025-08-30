@@ -39,9 +39,6 @@ import (
 
 	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	"github.com/sladg/autorestore-backup-operator/internal/controller"
-
-	// VolumeSnapshot types for backup functionality
-	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -54,15 +51,6 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(backupv1alpha1.AddToScheme(scheme))
-
-	// Try to add VolumeSnapshot types to scheme for backup functionality
-	// This is optional and won't fail if the CRD is not available
-	if err := snapshotv1.AddToScheme(scheme); err != nil {
-		// Log warning but don't fail - VolumeSnapshot functionality will be disabled
-		setupLog.Info("Warning: VolumeSnapshot types not available, backup will use file-level backup only")
-	} else {
-		setupLog.Info("VolumeSnapshot types added to scheme successfully")
-	}
 
 	// +kubebuilder:scaffold:scheme
 }

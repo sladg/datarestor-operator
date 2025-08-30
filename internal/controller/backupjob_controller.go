@@ -62,9 +62,9 @@ func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(pvcBackupJob, "backupjob.backup.autorestore-backup-operator.com/finalizer") {
+	if !controllerutil.ContainsFinalizer(pvcBackupJob, BackupJobFinalizer) {
 		logger.Starting("add finalizer")
-		controllerutil.AddFinalizer(pvcBackupJob, "backupjob.backup.autorestore-backup-operator.com/finalizer")
+		controllerutil.AddFinalizer(pvcBackupJob, BackupJobFinalizer)
 		if err := r.Update(ctx, pvcBackupJob); err != nil {
 			logger.Failed("add finalizer", err)
 			return ctrl.Result{}, err
@@ -103,7 +103,11 @@ func (r *BackupJobReconciler) handlePending(ctx context.Context, pvcBackupJob *b
 		Namespace: pvcBackupJob.Namespace,
 	}, &pvc); err != nil {
 		logger.Failed("get pvc", err)
-		return r.updateStatusWithError(ctx, pvcBackupJob, "Failed", fmt.Sprintf("PVC not found: %v", err))
+		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             fmt.Sprintf("PVC not found: %v", err),
+			SetCompletionTime: true,
+		})
 	}
 
 	// Generate backup ID
@@ -119,7 +123,11 @@ func (r *BackupJobReconciler) handlePending(ctx context.Context, pvcBackupJob *b
 	})
 	if err != nil {
 		logger.Failed("create restic job", err)
-		return r.updateStatusWithError(ctx, pvcBackupJob, "Failed", fmt.Sprintf("Failed to create backup job: %v", err))
+		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             fmt.Sprintf("Failed to create backup job: %v", err),
+			SetCompletionTime: true,
+		})
 	}
 
 	// Update status
@@ -147,7 +155,11 @@ func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *b
 	logger.Starting("check backup job status")
 
 	if pvcBackupJob.Status.JobRef == nil {
-		return r.updateStatusWithError(ctx, pvcBackupJob, "Failed", "Missing job reference")
+		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             "Missing job reference",
+			SetCompletionTime: true,
+		})
 	}
 
 	// Get the Kubernetes job
@@ -157,7 +169,11 @@ func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *b
 		Namespace: pvcBackupJob.Namespace,
 	}, &job); err != nil {
 		logger.Failed("get kubernetes job", err)
-		return r.updateStatusWithError(ctx, pvcBackupJob, "Failed", fmt.Sprintf("Job not found: %v", err))
+		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             fmt.Sprintf("Job not found: %v", err),
+			SetCompletionTime: true,
+		})
 	}
 
 	// Check job status
@@ -181,28 +197,16 @@ func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *b
 
 	if job.Status.Failed > 0 {
 		// Job failed
-		return r.updateStatusWithError(ctx, pvcBackupJob, "Failed", "Backup job failed")
+		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+			Phase:             "Failed",
+			Error:             "Backup job failed",
+			SetCompletionTime: true,
+		})
 	}
 
 	// Job is still running
 	logger.Debug("Backup job still running")
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-}
-
-// updateStatusWithError updates the status with error information
-func (r *BackupJobReconciler) updateStatusWithError(ctx context.Context, pvcBackupJob *backupv1alpha1.BackupJob, phase, errorMsg string) (ctrl.Result, error) {
-	now := metav1.Now()
-	pvcBackupJob.Status.Phase = phase
-	pvcBackupJob.Status.Error = errorMsg
-	if pvcBackupJob.Status.CompletionTime == nil {
-		pvcBackupJob.Status.CompletionTime = &now
-	}
-
-	if err := r.Status().Update(ctx, pvcBackupJob); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{}, nil
 }
 
 // handleDeletion handles cleanup when BackupJob is being deleted
@@ -229,7 +233,7 @@ func (r *BackupJobReconciler) handleDeletion(ctx context.Context, pvcBackupJob *
 	}
 
 	// Remove finalizer
-	controllerutil.RemoveFinalizer(pvcBackupJob, "backupjob.backup.autorestore-backup-operator.com/finalizer")
+	controllerutil.RemoveFinalizer(pvcBackupJob, BackupJobFinalizer)
 	if err := r.Update(ctx, pvcBackupJob); err != nil {
 		logger.Failed("remove finalizer", err)
 		return ctrl.Result{}, err
