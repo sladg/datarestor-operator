@@ -13,15 +13,15 @@ import (
 )
 
 // findMatchingPVCs finds PVCs that match the BackupConfig selector
-func (r *BackupConfigReconciler) findMatchingPVCs(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig) ([]corev1.PersistentVolumeClaim, error) {
+func (r *BackupConfigReconciler) findMatchingPVCs(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig) ([]corev1.PersistentVolumeClaim, error) {
 	logger := LoggerFrom(ctx, "pvc").
-		WithValues("name", pvcBackup.Name)
+		WithValues("name", backupConfig.Name)
 
 	logger.Starting("find matching PVCs")
 	var pvcs []corev1.PersistentVolumeClaim
 
 	// Handle namespace-specific selection
-	namespaces := pvcBackup.Spec.PVCSelector.Namespaces
+	namespaces := backupConfig.Spec.PVCSelector.Namespaces
 	if len(namespaces) == 0 {
 		// If no namespaces specified, search all namespaces
 		namespaces = []string{""}
@@ -49,8 +49,8 @@ func (r *BackupConfigReconciler) findMatchingPVCs(ctx context.Context, pvcBackup
 		}
 
 		// Filter by label selector
-		if pvcBackup.Spec.PVCSelector.LabelSelector != nil {
-			selector, err := metav1.LabelSelectorAsSelector(pvcBackup.Spec.PVCSelector.LabelSelector)
+		if backupConfig.Spec.PVCSelector.LabelSelector != nil {
+			selector, err := metav1.LabelSelectorAsSelector(backupConfig.Spec.PVCSelector.LabelSelector)
 			if err != nil {
 				nsLogger.Failed("parse label selector", err)
 				return nil, err
@@ -70,11 +70,11 @@ func (r *BackupConfigReconciler) findMatchingPVCs(ctx context.Context, pvcBackup
 	}
 
 	// Filter by specific names if provided
-	if len(pvcBackup.Spec.PVCSelector.Names) > 0 {
-		logger.WithValues("names", pvcBackup.Spec.PVCSelector.Names).Debug("Filtering by specific names")
+	if len(backupConfig.Spec.PVCSelector.Names) > 0 {
+		logger.WithValues("names", backupConfig.Spec.PVCSelector.Names).Debug("Filtering by specific names")
 		var filteredPVCs []corev1.PersistentVolumeClaim
 		nameSet := make(map[string]bool)
-		for _, name := range pvcBackup.Spec.PVCSelector.Names {
+		for _, name := range backupConfig.Spec.PVCSelector.Names {
 			nameSet[name] = true
 		}
 
@@ -94,15 +94,15 @@ func (r *BackupConfigReconciler) findMatchingPVCs(ctx context.Context, pvcBackup
 func (r *BackupConfigReconciler) findObjectsForPVC(ctx context.Context, obj client.Object) []reconcile.Request {
 	pvc := obj.(*corev1.PersistentVolumeClaim)
 
-	var pvcBackups backupv1alpha1.BackupConfigList
-	if err := r.List(ctx, &pvcBackups); err != nil {
+	var backupConfigs backupv1alpha1.BackupConfigList
+	if err := r.List(ctx, &backupConfigs); err != nil {
 		return nil
 	}
 
 	var requests []reconcile.Request
-	for _, pvcBackup := range pvcBackups.Items {
+	for _, backupConfig := range backupConfigs.Items {
 		// Check if PVC matches the selector
-		matchedPVCs, err := r.findMatchingPVCs(ctx, &pvcBackup)
+		matchedPVCs, err := r.findMatchingPVCs(ctx, &backupConfig)
 		if err != nil {
 			continue
 		}
@@ -111,8 +111,8 @@ func (r *BackupConfigReconciler) findObjectsForPVC(ctx context.Context, obj clie
 			if matchedPVC.Name == pvc.Name && matchedPVC.Namespace == pvc.Namespace {
 				requests = append(requests, reconcile.Request{
 					NamespacedName: types.NamespacedName{
-						Name:      pvcBackup.Name,
-						Namespace: pvcBackup.Namespace,
+						Name:      backupConfig.Name,
+						Namespace: backupConfig.Namespace,
 					},
 				})
 				break

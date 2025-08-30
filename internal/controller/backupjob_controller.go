@@ -47,8 +47,8 @@ func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	logger.Starting("reconcile")
 
 	// Fetch the BackupJob instance
-	pvcBackupJob := &backupv1alpha1.BackupJob{}
-	err := r.Get(ctx, req.NamespacedName, pvcBackupJob)
+	backupJob := &backupv1alpha1.BackupJob{}
+	err := r.Get(ctx, req.NamespacedName, backupJob)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -57,15 +57,15 @@ func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Check if BackupJob is being deleted
-	if !pvcBackupJob.DeletionTimestamp.IsZero() {
-		return r.handleDeletion(ctx, pvcBackupJob)
+	if !backupJob.DeletionTimestamp.IsZero() {
+		return r.handleBackupJobDeletion(ctx, backupJob)
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(pvcBackupJob, BackupJobFinalizer) {
+	if !controllerutil.ContainsFinalizer(backupJob, BackupJobFinalizer) {
 		logger.Starting("add finalizer")
-		controllerutil.AddFinalizer(pvcBackupJob, BackupJobFinalizer)
-		if err := r.Update(ctx, pvcBackupJob); err != nil {
+		controllerutil.AddFinalizer(backupJob, BackupJobFinalizer)
+		if err := r.Update(ctx, backupJob); err != nil {
 			logger.Failed("add finalizer", err)
 			return ctrl.Result{}, err
 		}
@@ -74,36 +74,36 @@ func (r *BackupJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Handle different phases
-	switch pvcBackupJob.Status.Phase {
+	switch backupJob.Status.Phase {
 	case "":
-		return r.handlePending(ctx, pvcBackupJob)
+		return r.handlePending(ctx, backupJob)
 	case "Pending":
-		return r.handlePending(ctx, pvcBackupJob)
+		return r.handlePending(ctx, backupJob)
 	case "Running":
-		return r.handleRunning(ctx, pvcBackupJob)
+		return r.handleRunning(ctx, backupJob)
 	case "Completed", "Failed":
 		// Job is done, no further action needed
 		return ctrl.Result{}, nil
 	default:
-		return r.handlePending(ctx, pvcBackupJob)
+		return r.handlePending(ctx, backupJob)
 	}
 }
 
 // handlePending starts the backup job
-func (r *BackupJobReconciler) handlePending(ctx context.Context, pvcBackupJob *backupv1alpha1.BackupJob) (ctrl.Result, error) {
+func (r *BackupJobReconciler) handlePending(ctx context.Context, backupJob *backupv1alpha1.BackupJob) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "backupjob").
-		WithValues("name", pvcBackupJob.Name, "namespace", pvcBackupJob.Namespace)
+		WithValues("name", backupJob.Name, "namespace", backupJob.Namespace)
 
 	logger.Starting("start backup job")
 
 	// Get the PVC
 	var pvc corev1.PersistentVolumeClaim
 	if err := r.Get(ctx, client.ObjectKey{
-		Name:      pvcBackupJob.Spec.PVCRef.Name,
-		Namespace: pvcBackupJob.Namespace,
+		Name:      backupJob.Spec.PVCRef.Name,
+		Namespace: backupJob.Namespace,
 	}, &pvc); err != nil {
 		logger.Failed("get pvc", err)
-		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+		return UpdateJobStatus(ctx, r.Client, backupJob, JobStatusOptions{
 			Phase:             "Failed",
 			Error:             fmt.Sprintf("PVC not found: %v", err),
 			SetCompletionTime: true,
@@ -119,11 +119,11 @@ func (r *BackupJobReconciler) handlePending(ctx context.Context, pvcBackupJob *b
 		"--tag", fmt.Sprintf("id=%s", backupID),
 		"--tag", fmt.Sprintf("pvc=%s", pvc.Name),
 		"--tag", fmt.Sprintf("namespace=%s", pvc.Namespace),
-		"--tag", fmt.Sprintf("job=%s", pvcBackupJob.Name),
+		"--tag", fmt.Sprintf("job=%s", backupJob.Name),
 	})
 	if err != nil {
 		logger.Failed("create restic job", err)
-		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+		return UpdateJobStatus(ctx, r.Client, backupJob, JobStatusOptions{
 			Phase:             "Failed",
 			Error:             fmt.Sprintf("Failed to create backup job: %v", err),
 			SetCompletionTime: true,
@@ -132,13 +132,13 @@ func (r *BackupJobReconciler) handlePending(ctx context.Context, pvcBackupJob *b
 
 	// Update status
 	now := metav1.Now()
-	pvcBackupJob.Status.Phase = "Running"
-	pvcBackupJob.Status.StartTime = &now
-	pvcBackupJob.Status.ResticID = backupID
-	pvcBackupJob.Status.Repository = pvcBackupJob.Spec.BackupTarget.Restic.Repository
-	pvcBackupJob.Status.JobRef = &corev1.LocalObjectReference{Name: job.Name}
+	backupJob.Status.Phase = "Running"
+	backupJob.Status.StartTime = &now
+	backupJob.Status.ResticID = backupID
+	backupJob.Status.Repository = backupJob.Spec.BackupTarget.Restic.Repository
+	backupJob.Status.JobRef = &corev1.LocalObjectReference{Name: job.Name}
 
-	if err := r.Status().Update(ctx, pvcBackupJob); err != nil {
+	if err := r.Status().Update(ctx, backupJob); err != nil {
 		logger.Failed("update status", err)
 		return ctrl.Result{}, err
 	}
@@ -148,14 +148,14 @@ func (r *BackupJobReconciler) handlePending(ctx context.Context, pvcBackupJob *b
 }
 
 // handleRunning monitors the running backup job
-func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *backupv1alpha1.BackupJob) (ctrl.Result, error) {
+func (r *BackupJobReconciler) handleRunning(ctx context.Context, backupJob *backupv1alpha1.BackupJob) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "backupjob").
-		WithValues("name", pvcBackupJob.Name, "namespace", pvcBackupJob.Namespace)
+		WithValues("name", backupJob.Name, "namespace", backupJob.Namespace)
 
 	logger.Starting("check backup job status")
 
-	if pvcBackupJob.Status.JobRef == nil {
-		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+	if backupJob.Status.JobRef == nil {
+		return UpdateJobStatus(ctx, r.Client, backupJob, JobStatusOptions{
 			Phase:             "Failed",
 			Error:             "Missing job reference",
 			SetCompletionTime: true,
@@ -165,11 +165,11 @@ func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *b
 	// Get the Kubernetes job
 	var job batchv1.Job
 	if err := r.Get(ctx, client.ObjectKey{
-		Name:      pvcBackupJob.Status.JobRef.Name,
-		Namespace: pvcBackupJob.Namespace,
+		Name:      backupJob.Status.JobRef.Name,
+		Namespace: backupJob.Namespace,
 	}, &job); err != nil {
 		logger.Failed("get kubernetes job", err)
-		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+		return UpdateJobStatus(ctx, r.Client, backupJob, JobStatusOptions{
 			Phase:             "Failed",
 			Error:             fmt.Sprintf("Job not found: %v", err),
 			SetCompletionTime: true,
@@ -180,13 +180,13 @@ func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *b
 	if job.Status.Succeeded > 0 {
 		// Job completed successfully
 		now := metav1.Now()
-		pvcBackupJob.Status.Phase = "Completed"
-		pvcBackupJob.Status.CompletionTime = &now
+		backupJob.Status.Phase = "Completed"
+		backupJob.Status.CompletionTime = &now
 
 		// Try to get backup size from Restic (optional)
 		// This could be enhanced to parse logs for size information
 
-		if err := r.Status().Update(ctx, pvcBackupJob); err != nil {
+		if err := r.Status().Update(ctx, backupJob); err != nil {
 			logger.Failed("update status", err)
 			return ctrl.Result{}, err
 		}
@@ -197,7 +197,7 @@ func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *b
 
 	if job.Status.Failed > 0 {
 		// Job failed
-		return UpdateJobStatus(ctx, r.Client, pvcBackupJob, JobStatusOptions{
+		return UpdateJobStatus(ctx, r.Client, backupJob, JobStatusOptions{
 			Phase:             "Failed",
 			Error:             "Backup job failed",
 			SetCompletionTime: true,
@@ -207,40 +207,6 @@ func (r *BackupJobReconciler) handleRunning(ctx context.Context, pvcBackupJob *b
 	// Job is still running
 	logger.Debug("Backup job still running")
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-}
-
-// handleDeletion handles cleanup when BackupJob is being deleted
-func (r *BackupJobReconciler) handleDeletion(ctx context.Context, pvcBackupJob *backupv1alpha1.BackupJob) (ctrl.Result, error) {
-	logger := LoggerFrom(ctx, "backupjob").
-		WithValues("name", pvcBackupJob.Name, "namespace", pvcBackupJob.Namespace)
-
-	logger.Starting("handle deletion")
-
-	// Clean up the associated Kubernetes job if it exists
-	if pvcBackupJob.Status.JobRef != nil {
-		var job batchv1.Job
-		err := r.Get(ctx, client.ObjectKey{
-			Name:      pvcBackupJob.Status.JobRef.Name,
-			Namespace: pvcBackupJob.Namespace,
-		}, &job)
-		if err == nil {
-			if err := r.Delete(ctx, &job); err != nil {
-				logger.Failed("delete kubernetes job", err)
-			} else {
-				logger.Debug("Deleted associated Kubernetes job")
-			}
-		}
-	}
-
-	// Remove finalizer
-	controllerutil.RemoveFinalizer(pvcBackupJob, BackupJobFinalizer)
-	if err := r.Update(ctx, pvcBackupJob); err != nil {
-		logger.Failed("remove finalizer", err)
-		return ctrl.Result{}, err
-	}
-
-	logger.Completed("handle deletion")
-	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager

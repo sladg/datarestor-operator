@@ -45,7 +45,7 @@ func NewResticJob(client client.Client, typedClient kubernetes.Interface) *Resti
 }
 
 // createResticJob creates a Kubernetes Job to run restic commands
-func (r *ResticJob) createResticJob(ctx context.Context, pvc corev1.PersistentVolumeClaim, pvcBackup *backupv1alpha1.BackupConfig, jobType string, resticArgs []string) (*batchv1.Job, error) {
+func (r *ResticJob) createResticJob(ctx context.Context, pvc corev1.PersistentVolumeClaim, backupConfig *backupv1alpha1.BackupConfig, jobType string, resticArgs []string) (*batchv1.Job, error) {
 	logger := LoggerFrom(ctx, "job").
 		WithPVC(pvc).
 		WithValues("type", jobType)
@@ -56,8 +56,8 @@ func (r *ResticJob) createResticJob(ctx context.Context, pvc corev1.PersistentVo
 	logger.WithValues("name", jobName).Debug("Generated job name")
 
 	resticTarget := (*backupv1alpha1.BackupTarget)(nil)
-	if pvcBackup != nil {
-		for _, target := range pvcBackup.Spec.BackupTargets {
+	if backupConfig != nil {
+		for _, target := range backupConfig.Spec.BackupTargets {
 			if target.Restic != nil {
 				resticTarget = &target
 				break
@@ -91,9 +91,9 @@ func (r *ResticJob) createResticJob(ctx context.Context, pvc corev1.PersistentVo
 	}
 
 	labels := map[string]string{
-		"backupconfig.autorestore-backup-operator.com/restic-job": jobType,
-		"backupconfig.autorestore-backup-operator.com/pvc-name":   pvc.Name,
-		"backupconfig.autorestore-backup-operator.com/created-by": resticTarget.Name,
+		LabelResticJob: jobType,
+		LabelPVCName:   pvc.Name,
+		LabelCreatedBy: resticTarget.Name,
 	}
 
 	job := &batchv1.Job{
@@ -227,20 +227,20 @@ func (r *ResticJob) waitForJobCompletion(ctx context.Context, job *batchv1.Job) 
 }
 
 // UploadBackup uploads backup data using Restic
-func (r *ResticJob) UploadBackup(ctx context.Context, target backupv1alpha1.BackupTarget, backupData interface{}, pvc corev1.PersistentVolumeClaim, pvcBackup *backupv1alpha1.BackupConfig) error {
-	if pvcBackup == nil {
-		return fmt.Errorf("pvcBackup is required")
+func (r *ResticJob) UploadBackup(ctx context.Context, target backupv1alpha1.BackupTarget, backupData interface{}, pvc corev1.PersistentVolumeClaim, backupConfig *backupv1alpha1.BackupConfig) error {
+	if backupConfig == nil {
+		return fmt.Errorf("backupConfig is required")
 	}
 
 	// Get backup ID from BackupConfig
-	backupID, ok := pvcBackup.Annotations["backupconfig.autorestore-backup-operator.com/backup-id"]
+	backupID, ok := backupConfig.Annotations[AnnotationBackupID]
 	if !ok {
 		return fmt.Errorf("backup ID not found in BackupConfig annotations")
 	}
 
 	// Create job with backup command and ID
 	args := []string{"backup", "/data", "--tag", fmt.Sprintf("id=%s", backupID)}
-	job, err := r.createResticJob(ctx, pvc, pvcBackup, "backup", args)
+	job, err := r.createResticJob(ctx, pvc, backupConfig, "backup", args)
 	if err != nil {
 		return fmt.Errorf("failed to create backup job: %w", err)
 	}
@@ -255,10 +255,10 @@ func (r *ResticJob) UploadBackup(ctx context.Context, target backupv1alpha1.Back
 }
 
 // getBackupsFromRestic finds backups for a PVC using Restic snapshots command
-func (r *ResticJob) getBackupsFromRestic(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim) (string, error) {
+func (r *ResticJob) getBackupsFromRestic(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim) (string, error) {
 	logger := LoggerFrom(ctx, "restic").
 		WithPVC(pvc).
-		WithValues("name", pvcBackup.Name)
+		WithValues("name", backupConfig.Name)
 
 	logger.Starting("find backups from restic")
 
@@ -275,8 +275,8 @@ func (r *ResticJob) getBackupsFromRestic(ctx context.Context, pvcBackup *backupv
 	var latestTime time.Time
 
 	// Try each backup target in priority order
-	targets := make([]backupv1alpha1.BackupTarget, len(pvcBackup.Spec.BackupTargets))
-	copy(targets, pvcBackup.Spec.BackupTargets)
+	targets := make([]backupv1alpha1.BackupTarget, len(backupConfig.Spec.BackupTargets))
+	copy(targets, backupConfig.Spec.BackupTargets)
 	sort.Slice(targets, func(i, j int) bool {
 		return targets[i].Priority < targets[j].Priority
 	})
@@ -297,7 +297,7 @@ func (r *ResticJob) getBackupsFromRestic(ctx context.Context, pvcBackup *backupv
 			"--tag", fmt.Sprintf("pvc=%s", pvc.Name),
 			"--tag", fmt.Sprintf("namespace=%s", pvc.Namespace),
 		}
-		job, err := r.createResticJob(ctx, pvc, pvcBackup, "list", args)
+		job, err := r.createResticJob(ctx, pvc, backupConfig, "list", args)
 		if err != nil {
 			targetLogger.Failed("create list job", err)
 			continue
@@ -398,11 +398,11 @@ func (r *ResticJob) getBackupsFromBackupJobs(ctx context.Context, pvc corev1.Per
 	logger.Starting("find backups from BackupJobs")
 
 	// List all BackupJobs for this PVC
-	var pvcBackupJobs backupv1alpha1.BackupJobList
-	if err := r.client.List(ctx, &pvcBackupJobs,
+	var backupConfigJobs backupv1alpha1.BackupJobList
+	if err := r.client.List(ctx, &backupConfigJobs,
 		client.InNamespace(pvc.Namespace),
 		client.MatchingLabels{
-			"backupconfig.autorestore-backup-operator.com/pvc": pvc.Name,
+			LabelPVC: pvc.Name,
 		}); err != nil {
 		logger.Failed("list backupjobs", err)
 		return "", fmt.Errorf("failed to list BackupJobs: %w", err)
@@ -412,8 +412,8 @@ func (r *ResticJob) getBackupsFromBackupJobs(ctx context.Context, pvc corev1.Per
 	var latestBackupJob *backupv1alpha1.BackupJob
 	var latestTime time.Time
 
-	for i := range pvcBackupJobs.Items {
-		job := &pvcBackupJobs.Items[i]
+	for i := range backupConfigJobs.Items {
+		job := &backupConfigJobs.Items[i]
 
 		// Only consider completed jobs with restic ID
 		if job.Status.Phase != "Completed" || job.Status.ResticID == "" {

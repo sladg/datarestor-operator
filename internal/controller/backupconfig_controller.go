@@ -59,8 +59,8 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	logger.Starting("reconcile")
 
 	// Fetch the BackupConfig instance
-	pvcBackup := &backupv1alpha1.BackupConfig{}
-	err := r.Get(ctx, req.NamespacedName, pvcBackup)
+	backupConfig := &backupv1alpha1.BackupConfig{}
+	err := r.Get(ctx, req.NamespacedName, backupConfig)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -72,15 +72,15 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Check if BackupConfig is being deleted
-	if !pvcBackup.DeletionTimestamp.IsZero() {
-		return r.handleBackupConfigDeletion(ctx, pvcBackup)
+	if !backupConfig.DeletionTimestamp.IsZero() {
+		return r.handleBackupConfigDeletion(ctx, backupConfig)
 	}
 
 	// Add finalizer if not present
-	if !containsFinalizer(pvcBackup, BackupConfigFinalizer) {
+	if !containsFinalizer(backupConfig, BackupConfigFinalizer) {
 		logger.Starting("add finalizer")
-		pvcBackup.Finalizers = append(pvcBackup.Finalizers, BackupConfigFinalizer)
-		if err := r.Update(ctx, pvcBackup); err != nil {
+		backupConfig.Finalizers = append(backupConfig.Finalizers, BackupConfigFinalizer)
+		if err := r.Update(ctx, backupConfig); err != nil {
 			logger.Failed("add finalizer", err)
 			return ctrl.Result{}, err
 		}
@@ -90,7 +90,7 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Find PVCs that match the selector
-	matchedPVCs, err := r.findMatchingPVCs(ctx, pvcBackup)
+	matchedPVCs, err := r.findMatchingPVCs(ctx, backupConfig)
 	if err != nil {
 		logger.Failed("find matching PVCs", err)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -99,12 +99,12 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Log the number of matched PVCs for debugging
 	logger.WithValues(
 		"count", len(matchedPVCs),
-		"namespaces", pvcBackup.Spec.PVCSelector.Namespaces,
+		"namespaces", backupConfig.Spec.PVCSelector.Namespaces,
 	).Debug("Found matching PVCs")
 
 	// Update status with managed PVCs
 	logger.Starting("update managed PVCs status")
-	if err := r.updateManagedPVCsStatus(ctx, pvcBackup, matchedPVCs); err != nil {
+	if err := r.updateManagedPVCsStatus(ctx, backupConfig, matchedPVCs); err != nil {
 		logger.Failed("update managed PVCs status", err)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
@@ -115,12 +115,12 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		logger.WithValues("pvcCount", len(matchedPVCs)).Debug("Processing schedule")
 
 		// Check for manual backup trigger
-		if val, ok := pvcBackup.Annotations["backup.autorestore-backup-operator.com/manual-trigger"]; ok && val == "now" {
+		if val, ok := backupConfig.Annotations[AnnotationManualTrigger]; ok && val == "now" {
 			logger.Starting("schedule manual backup")
 			successCount := 0
 			for _, pvc := range matchedPVCs {
-				if r.shouldCreateBackupJob(ctx, pvcBackup, pvc, "manual") {
-					if err := r.createBackupJob(ctx, pvcBackup, pvc, "manual"); err != nil {
+				if r.shouldCreateBackupJob(ctx, backupConfig, pvc, "manual") {
+					if err := r.createBackupJob(ctx, backupConfig, pvc, "manual"); err != nil {
 						logger.WithPVC(pvc).Failed("create manual backup job", err)
 					} else {
 						successCount++
@@ -129,8 +129,8 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				}
 			}
 			// Remove the annotation after scheduling
-			delete(pvcBackup.Annotations, "backup.autorestore-backup-operator.com/manual-trigger")
-			if err := r.Update(ctx, pvcBackup); err != nil {
+			delete(backupConfig.Annotations, AnnotationManualTrigger)
+			if err := r.Update(ctx, backupConfig); err != nil {
 				logger.Failed("remove manual-trigger annotation", err)
 			}
 			logger.WithValues("created", successCount).Completed("schedule manual backup")
@@ -138,12 +138,12 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 
 		// Check if it's time for scheduled backup
-		if r.shouldPerformBackup(pvcBackup) {
+		if r.shouldPerformBackup(backupConfig) {
 			logger.Starting("schedule backup")
 			successCount := 0
 			for _, pvc := range matchedPVCs {
-				if r.shouldCreateBackupJob(ctx, pvcBackup, pvc, "scheduled") {
-					if err := r.createBackupJob(ctx, pvcBackup, pvc, "scheduled"); err != nil {
+				if r.shouldCreateBackupJob(ctx, backupConfig, pvc, "scheduled") {
+					if err := r.createBackupJob(ctx, backupConfig, pvc, "scheduled"); err != nil {
 						logger.WithPVC(pvc).Failed("create scheduled backup job", err)
 					} else {
 						successCount++
@@ -152,18 +152,18 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				}
 			}
 			if successCount > 0 {
-				r.updateBackupStatus(ctx, pvcBackup, successCount)
+				r.updateBackupStatus(ctx, backupConfig, successCount)
 			}
 			logger.WithValues("created", successCount).Completed("schedule backup")
 		}
 
 		// Handle restore scheduling for new PVCs
-		if pvcBackup.Spec.AutoRestore {
+		if backupConfig.Spec.AutoRestore {
 			logger.Starting("schedule auto restore")
 			successCount := 0
 			for _, pvc := range matchedPVCs {
 				if r.needsAutoRestore(ctx, pvc) {
-					if err := r.createRestoreJob(ctx, pvcBackup, pvc); err != nil {
+					if err := r.createRestoreJob(ctx, backupConfig, pvc); err != nil {
 						logger.WithPVC(pvc).Failed("create auto restore job", err)
 					} else {
 						successCount++
@@ -174,7 +174,7 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			logger.WithValues("created", successCount).Completed("schedule auto restore")
 		}
 	} else {
-		logger.WithValues("namespaces", pvcBackup.Spec.PVCSelector.Namespaces).
+		logger.WithValues("namespaces", backupConfig.Spec.PVCSelector.Namespaces).
 			Debug("No matching PVCs found")
 	}
 
@@ -215,28 +215,28 @@ func (r *BackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // createBackupJob creates a new BackupJob resource
-func (r *BackupConfigReconciler) createBackupJob(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim, backupType string) error {
-	if len(pvcBackup.Spec.BackupTargets) == 0 {
+func (r *BackupConfigReconciler) createBackupJob(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim, backupType string) error {
+	if len(backupConfig.Spec.BackupTargets) == 0 {
 		return fmt.Errorf("no backup targets configured")
 	}
 
-	jobName := fmt.Sprintf("%s-%s-%s", pvcBackup.Name, pvc.Name, time.Now().Format("20060102-150405"))
-	target := pvcBackup.Spec.BackupTargets[0] // Use first target
+	jobName := fmt.Sprintf("%s-%s-%s", backupConfig.Name, pvc.Name, time.Now().Format("20060102-150405"))
+	target := backupConfig.Spec.BackupTargets[0] // Use first target
 
-	pvcBackupJob := &backupv1alpha1.BackupJob{
+	backupConfigJob := &backupv1alpha1.BackupJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: pvc.Namespace,
 			Labels: map[string]string{
-				"backupconfig.autorestore-backup-operator.com/pvcbackup": pvcBackup.Name,
-				"backupconfig.autorestore-backup-operator.com/pvc":       pvc.Name,
+				LabelPVCBackup: backupConfig.Name,
+				LabelPVC:       pvc.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: pvcBackup.APIVersion,
-					Kind:       pvcBackup.Kind,
-					Name:       pvcBackup.Name,
-					UID:        pvcBackup.UID,
+					APIVersion: backupConfig.APIVersion,
+					Kind:       backupConfig.Kind,
+					Name:       backupConfig.Name,
+					UID:        backupConfig.UID,
 				},
 			},
 		},
@@ -246,38 +246,38 @@ func (r *BackupConfigReconciler) createBackupJob(ctx context.Context, pvcBackup 
 			},
 			BackupTarget: target,
 			BackupConfigRef: corev1.LocalObjectReference{
-				Name: pvcBackup.Name,
+				Name: backupConfig.Name,
 			},
 			BackupType: backupType,
 		},
 	}
 
-	return r.Create(ctx, pvcBackupJob)
+	return r.Create(ctx, backupConfigJob)
 }
 
 // createRestoreJob creates a new RestoreJob resource
-func (r *BackupConfigReconciler) createRestoreJob(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim) error {
-	if len(pvcBackup.Spec.BackupTargets) == 0 {
+func (r *BackupConfigReconciler) createRestoreJob(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim) error {
+	if len(backupConfig.Spec.BackupTargets) == 0 {
 		return fmt.Errorf("no backup targets configured")
 	}
 
-	jobName := fmt.Sprintf("restore-%s-%s-%s", pvcBackup.Name, pvc.Name, time.Now().Format("20060102-150405"))
-	target := pvcBackup.Spec.BackupTargets[0] // Use first target
+	jobName := fmt.Sprintf("restore-%s-%s-%s", backupConfig.Name, pvc.Name, time.Now().Format("20060102-150405"))
+	target := backupConfig.Spec.BackupTargets[0] // Use first target
 
 	restoreJob := &backupv1alpha1.RestoreJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: pvc.Namespace,
 			Labels: map[string]string{
-				"backupconfig.autorestore-backup-operator.com/pvcbackup": pvcBackup.Name,
-				"backupconfig.autorestore-backup-operator.com/pvc":       pvc.Name,
+				LabelPVCBackup: backupConfig.Name,
+				LabelPVC:       pvc.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: pvcBackup.APIVersion,
-					Kind:       pvcBackup.Kind,
-					Name:       pvcBackup.Name,
-					UID:        pvcBackup.UID,
+					APIVersion: backupConfig.APIVersion,
+					Kind:       backupConfig.Kind,
+					Name:       backupConfig.Name,
+					UID:        backupConfig.UID,
 				},
 			},
 		},
@@ -287,7 +287,7 @@ func (r *BackupConfigReconciler) createRestoreJob(ctx context.Context, pvcBackup
 			},
 			BackupTarget: target,
 			BackupConfigRef: corev1.LocalObjectReference{
-				Name: pvcBackup.Name,
+				Name: backupConfig.Name,
 			},
 			RestoreType: "automated",
 		},
@@ -299,7 +299,7 @@ func (r *BackupConfigReconciler) createRestoreJob(ctx context.Context, pvcBackup
 // needsAutoRestore checks if a PVC needs automatic restoration
 func (r *BackupConfigReconciler) needsAutoRestore(ctx context.Context, pvc corev1.PersistentVolumeClaim) bool {
 	// Check if PVC has the restore annotation
-	if val, ok := pvc.Annotations["restore.autorestore-backup-operator.com/needed"]; ok && val == "true" {
+	if val, ok := pvc.Annotations[AnnotationRestoreNeeded]; ok && val == "true" {
 		return true
 	}
 
@@ -308,18 +308,18 @@ func (r *BackupConfigReconciler) needsAutoRestore(ctx context.Context, pvc corev
 	logger := LoggerFrom(ctx, "auto-restore").WithPVC(pvc)
 
 	// Quick check if any BackupJobs exist for this PVC
-	var pvcBackupJobs backupv1alpha1.BackupJobList
-	if err := r.List(ctx, &pvcBackupJobs,
+	var backupConfigJobs backupv1alpha1.BackupJobList
+	if err := r.List(ctx, &backupConfigJobs,
 		client.InNamespace(pvc.Namespace),
 		client.MatchingLabels{
-			"backupconfig.autorestore-backup-operator.com/pvc": pvc.Name,
+			LabelPVC: pvc.Name,
 		}); err != nil {
 		logger.WithValues("error", err).Debug("Failed to check for existing backup jobs")
 		return false
 	}
 
 	// Only auto-restore if there are completed backup jobs
-	for _, job := range pvcBackupJobs.Items {
+	for _, job := range backupConfigJobs.Items {
 		if job.Status.Phase == "Completed" && job.Status.ResticID != "" {
 			logger.Debug("Found existing backup, PVC needs auto-restore")
 			return true
@@ -331,18 +331,18 @@ func (r *BackupConfigReconciler) needsAutoRestore(ctx context.Context, pvc corev
 }
 
 // shouldCreateBackupJob checks if a backup job should be created for a specific PVC
-func (r *BackupConfigReconciler) shouldCreateBackupJob(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim, backupType string) bool {
+func (r *BackupConfigReconciler) shouldCreateBackupJob(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim, backupType string) bool {
 	logger := LoggerFrom(ctx, "scheduler").
 		WithPVC(pvc).
 		WithValues("type", backupType)
 
 	// Check existing backup jobs for this PVC
-	var pvcBackupJobs backupv1alpha1.BackupJobList
-	if err := r.List(ctx, &pvcBackupJobs,
+	var backupConfigJobs backupv1alpha1.BackupJobList
+	if err := r.List(ctx, &backupConfigJobs,
 		client.InNamespace(pvc.Namespace),
 		client.MatchingLabels{
-			"backupconfig.autorestore-backup-operator.com/pvcbackup": pvcBackup.Name,
-			"backupconfig.autorestore-backup-operator.com/pvc":       pvc.Name,
+			LabelPVCBackup: backupConfig.Name,
+			LabelPVC:       pvc.Name,
 		}); err != nil {
 		logger.WithValues("error", err).Debug("Failed to check existing backup jobs")
 		return true // Default to creating job if check fails
@@ -351,7 +351,7 @@ func (r *BackupConfigReconciler) shouldCreateBackupJob(ctx context.Context, pvcB
 	// Count only pending jobs - we don't care about running jobs for scheduling decisions
 	var pendingJobs []backupv1alpha1.BackupJob
 
-	for _, job := range pvcBackupJobs.Items {
+	for _, job := range backupConfigJobs.Items {
 		switch job.Status.Phase {
 		case "", "Pending":
 			pendingJobs = append(pendingJobs, job)
@@ -384,25 +384,50 @@ func (r *BackupConfigReconciler) shouldCreateBackupJob(ctx context.Context, pvcB
 }
 
 // updateBackupStatus updates the BackupConfig status after creating backup jobs
-func (r *BackupConfigReconciler) updateBackupStatus(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, successCount int) {
+func (r *BackupConfigReconciler) updateBackupStatus(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig, successCount int) {
 	logger := LoggerFrom(ctx, "scheduler").
-		WithValues("name", pvcBackup.Name)
+		WithValues("name", backupConfig.Name)
 
 	now := time.Now()
-	pvcBackup.Status.LastBackup = &metav1.Time{Time: now}
+	backupConfig.Status.LastBackup = &metav1.Time{Time: now}
 
 	// Calculate next backup time
-	if pvcBackup.Spec.Schedule.Cron != "" {
-		schedule, err := r.cronParser.Parse(pvcBackup.Spec.Schedule.Cron)
+	if backupConfig.Spec.Schedule.Cron != "" {
+		schedule, err := r.cronParser.Parse(backupConfig.Spec.Schedule.Cron)
 		if err == nil {
 			nextBackup := schedule.Next(now)
-			pvcBackup.Status.NextBackup = &metav1.Time{Time: nextBackup}
+			backupConfig.Status.NextBackup = &metav1.Time{Time: nextBackup}
 		}
 	}
 
-	pvcBackup.Status.SuccessfulBackups += int32(successCount)
+	backupConfig.Status.SuccessfulBackups += int32(successCount)
 
-	if err := r.Status().Update(ctx, pvcBackup); err != nil {
+	if err := r.Status().Update(ctx, backupConfig); err != nil {
 		logger.Failed("update status", err)
 	}
+}
+
+// shouldPerformBackup checks if it's time to perform a backup based on schedule
+func (r *BackupConfigReconciler) shouldPerformBackup(backupConfig *backupv1alpha1.BackupConfig) bool {
+	// If no cron schedule, only perform manual backups
+	if backupConfig.Spec.Schedule.Cron == "" {
+		return false
+	}
+
+	// Parse the cron schedule
+	schedule, err := r.cronParser.Parse(backupConfig.Spec.Schedule.Cron)
+	if err != nil {
+		return false
+	}
+
+	now := time.Now()
+
+	// If there's no last backup time, perform backup now
+	if backupConfig.Status.LastBackup == nil {
+		return true
+	}
+
+	// Check if it's time for the next backup
+	nextBackup := schedule.Next(backupConfig.Status.LastBackup.Time)
+	return now.After(nextBackup) || now.Equal(nextBackup)
 }

@@ -2,7 +2,6 @@ package controller
 
 import (
 	context "context"
-	"time"
 
 	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -10,21 +9,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
-
-func (r *BackupConfigReconciler) isPodHealthy(pod *corev1.Pod) bool {
-	if pod.Status.Phase != corev1.PodRunning {
-		return false
-	}
-	for _, containerStatus := range pod.Status.ContainerStatuses {
-		if !containerStatus.Ready {
-			return false
-		}
-	}
-	if pod.Status.StartTime == nil || time.Since(pod.Status.StartTime.Time) < 30*time.Second {
-		return false
-	}
-	return true
-}
 
 // findObjectsForPod finds BackupConfig objects for a given Pod
 func (r *BackupConfigReconciler) findObjectsForPod(ctx context.Context, obj client.Object) []reconcile.Request {
@@ -42,14 +26,14 @@ func (r *BackupConfigReconciler) findObjectsForPod(ctx context.Context, obj clie
 		return nil
 	}
 
-	var pvcBackups backupv1alpha1.BackupConfigList
-	if err := r.List(ctx, &pvcBackups); err != nil {
+	var backupConfigs backupv1alpha1.BackupConfigList
+	if err := r.List(ctx, &backupConfigs); err != nil {
 		return nil
 	}
 
 	var requests []reconcile.Request
-	for _, pvcBackup := range pvcBackups.Items {
-		matchedPVCs, err := r.findMatchingPVCs(ctx, &pvcBackup)
+	for _, backupConfig := range backupConfigs.Items {
+		matchedPVCs, err := r.findMatchingPVCs(ctx, &backupConfig)
 		if err != nil {
 			continue
 		}
@@ -59,8 +43,8 @@ func (r *BackupConfigReconciler) findObjectsForPod(ctx context.Context, obj clie
 				if matchedPVC.Name == pvcName && matchedPVC.Namespace == pod.Namespace {
 					requests = append(requests, reconcile.Request{
 						NamespacedName: types.NamespacedName{
-							Name:      pvcBackup.Name,
-							Namespace: pvcBackup.Namespace,
+							Name:      backupConfig.Name,
+							Namespace: backupConfig.Namespace,
 						},
 					})
 					break

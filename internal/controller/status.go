@@ -12,9 +12,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func (r *BackupConfigReconciler) updateManagedPVCsStatus(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvcs []corev1.PersistentVolumeClaim) error {
+func (r *BackupConfigReconciler) updateManagedPVCsStatus(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig, pvcs []corev1.PersistentVolumeClaim) error {
 	logger := LoggerFrom(ctx, "status").
-		WithValues("name", pvcBackup.Name)
+		WithValues("name", backupConfig.Name)
 
 	logger.Starting("update managed PVCs")
 
@@ -22,9 +22,9 @@ func (r *BackupConfigReconciler) updateManagedPVCsStatus(ctx context.Context, pv
 	for _, pvc := range pvcs {
 		pvcNames = append(pvcNames, fmt.Sprintf("%s/%s", pvc.Namespace, pvc.Name))
 	}
-	pvcBackup.Status.ManagedPVCs = pvcNames
+	backupConfig.Status.ManagedPVCs = pvcNames
 
-	if err := r.Status().Update(ctx, pvcBackup); err != nil {
+	if err := r.Status().Update(ctx, backupConfig); err != nil {
 		logger.Failed("update status", err)
 		return err
 	}
