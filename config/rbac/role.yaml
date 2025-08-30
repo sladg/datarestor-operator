@@ -4,90 +4,112 @@ kind: ClusterRole
 metadata:
   name: manager-role
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
-  - patch
-- apiGroups:
-  - ""
-  resources:
-  - persistentvolumeclaims
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - persistentvolumeclaims/status
-  - pods/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - snapshot.storage.k8s.io
-  resources:
-  - volumesnapshots
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - snapshot.storage.k8s.io
-  resources:
-  - volumesnapshots/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - storage.cheap-man-ha-store.com
-  resources:
-  - pvcbackupjobs
-  - pvcbackups
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - storage.cheap-man-ha-store.com
-  resources:
-  - pvcbackupjobs/finalizers
-  - pvcbackups/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - storage.cheap-man-ha-store.com
-  resources:
-  - pvcbackupjobs/status
-  - pvcbackups/status
-  verbs:
-  - get
-  - patch
-  - update
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims/status
+      - pods/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - backup.autorestore-backup-operator.com
+    resources:
+      - backupconfigs
+      - backupjobs
+      - restorejobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - backup.autorestore-backup-operator.com
+    resources:
+      - backupconfigs/finalizers
+      - backupjobs/finalizers
+      - restorejobs/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - backup.autorestore-backup-operator.com
+    resources:
+      - backupconfigs/status
+      - backupjobs/status
+      - restorejobs/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - snapshot.storage.k8s.io
+    resources:
+      - volumesnapshots
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - snapshot.storage.k8s.io
+    resources:
+      - volumesnapshots/status
+    verbs:
+      - get
+      - patch
+      - update

@@ -37,8 +37,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
-	"github.com/cheap-man-ha-store/cheap-man-ha-store/internal/controller"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
+	"github.com/sladg/autorestore-backup-operator/internal/controller"
 
 	// VolumeSnapshot types for backup functionality
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
@@ -53,7 +53,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(storagev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(backupv1alpha1.AddToScheme(scheme))
 
 	// Try to add VolumeSnapshot types to scheme for backup functionality
 	// This is optional and won't fail if the CRD is not available
@@ -197,7 +197,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "a2ab1107.cheap-man-ha-store.com",
+		LeaderElectionID:       "a2ab1107.autorestore-backup-operator.com",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -215,8 +215,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := controller.NewPVCBackupReconciler(mgr.GetClient(), mgr.GetScheme()).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PVCBackup")
+	if err := (&controller.BackupConfigReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "BackupConfig")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

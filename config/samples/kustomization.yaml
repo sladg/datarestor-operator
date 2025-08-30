@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- storage_v1alpha1_pvcbackup.yaml
+  - backup_v1alpha1_backupconfig.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

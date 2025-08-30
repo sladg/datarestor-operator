@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -15,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-// findMatchingPVCs finds PVCs that match the PVCBackup selector
-func (r *PVCBackupReconciler) findMatchingPVCs(ctx context.Context, pvcBackup *storagev1alpha1.PVCBackup) ([]corev1.PersistentVolumeClaim, error) {
+// findMatchingPVCs finds PVCs that match the BackupConfig selector
+func (r *BackupConfigReconciler) findMatchingPVCs(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig) ([]corev1.PersistentVolumeClaim, error) {
 	logger := LoggerFrom(ctx, "pvc").
 		WithValues("name", pvcBackup.Name)
 
@@ -93,7 +93,7 @@ func (r *PVCBackupReconciler) findMatchingPVCs(ctx context.Context, pvcBackup *s
 	return pvcs, nil
 }
 
-func (r *PVCBackupReconciler) isPVCHealthy(ctx context.Context, pvc corev1.PersistentVolumeClaim) bool {
+func (r *BackupConfigReconciler) isPVCHealthy(ctx context.Context, pvc corev1.PersistentVolumeClaim) bool {
 	logger := LoggerFrom(ctx, "pvc").
 		WithValues("pvc", pvc.Name)
 
@@ -129,7 +129,7 @@ func (r *PVCBackupReconciler) isPVCHealthy(ctx context.Context, pvc corev1.Persi
 }
 
 // waitForSnapshotReady waits for the VolumeSnapshot to be ready
-func (r *PVCBackupReconciler) waitForSnapshotReady(ctx context.Context, snapshot *snapshotv1.VolumeSnapshot) error {
+func (r *BackupConfigReconciler) waitForSnapshotReady(ctx context.Context, snapshot *snapshotv1.VolumeSnapshot) error {
 	logger := LoggerFrom(ctx, "snapshot").
 		WithValues("name", snapshot.Name, "namespace", snapshot.Namespace)
 
@@ -170,7 +170,7 @@ func (r *PVCBackupReconciler) waitForSnapshotReady(ctx context.Context, snapshot
 }
 
 // createVolumeSnapshot creates a VolumeSnapshot for the PVC
-func (r *PVCBackupReconciler) createVolumeSnapshot(ctx context.Context, pvcBackup *storagev1alpha1.PVCBackup, pvc corev1.PersistentVolumeClaim) (interface{}, error) {
+func (r *BackupConfigReconciler) createVolumeSnapshot(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvc corev1.PersistentVolumeClaim) (interface{}, error) {
 	logger := LoggerFrom(ctx, "snapshot").
 		WithPVC(pvc).
 		WithValues("name", pvcBackup.Name)
@@ -187,10 +187,10 @@ func (r *PVCBackupReconciler) createVolumeSnapshot(ctx context.Context, pvcBacku
 			Name:      snapshotName,
 			Namespace: pvc.Namespace,
 			Labels: map[string]string{
-				"pvcbackup.cheap-man-ha-store.com/created-by": pvcBackup.Name,
-				"pvcbackup.cheap-man-ha-store.com/pvc-name":   pvc.Name,
-				"pvcbackup.cheap-man-ha-store.com/timestamp":  time.Now().Format("20060102-150405"),
-				"pvcbackup.cheap-man-ha-store.com/target":     "volumesnapshot",
+				"backupconfig.autorestore-backup-operator.com/created-by": pvcBackup.Name,
+				"backupconfig.autorestore-backup-operator.com/pvc-name":   pvc.Name,
+				"backupconfig.autorestore-backup-operator.com/timestamp":  time.Now().Format("20060102-150405"),
+				"backupconfig.autorestore-backup-operator.com/target":     "volumesnapshot",
 			},
 		},
 		Spec: snapshotv1.VolumeSnapshotSpec{
@@ -217,11 +217,11 @@ func (r *PVCBackupReconciler) createVolumeSnapshot(ctx context.Context, pvcBacku
 	return snapshot, nil
 }
 
-// findObjectsForPVC finds PVCBackup objects for a given PVC
-func (r *PVCBackupReconciler) findObjectsForPVC(ctx context.Context, obj client.Object) []reconcile.Request {
+// findObjectsForPVC finds BackupConfig objects for a given PVC
+func (r *BackupConfigReconciler) findObjectsForPVC(ctx context.Context, obj client.Object) []reconcile.Request {
 	pvc := obj.(*corev1.PersistentVolumeClaim)
 
-	var pvcBackups storagev1alpha1.PVCBackupList
+	var pvcBackups backupv1alpha1.BackupConfigList
 	if err := r.List(ctx, &pvcBackups); err != nil {
 		return nil
 	}

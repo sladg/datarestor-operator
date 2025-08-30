@@ -1,7 +1,7 @@
-apiVersion: storage.cheap-man-ha-store.com/v1alpha1
-kind: PVCBackup
+apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+kind: BackupConfig
 metadata:
-  name: pvcbackup-restic-example
+  name: backupconfig-restic-example
   namespace: default
 spec:
   # Backup targets using Restic

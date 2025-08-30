@@ -21,8 +21,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PVCBackupJobSpec defines the desired state of PVCBackupJob
-type PVCBackupJobSpec struct {
+// BackupJobSpec defines the desired state of BackupJob
+type BackupJobSpec struct {
 	// PVC reference for this backup job
 	// +required
 	PVCRef corev1.LocalObjectReference `json:"pvcRef"`
@@ -31,17 +31,17 @@ type PVCBackupJobSpec struct {
 	// +required
 	BackupTarget BackupTarget `json:"backupTarget"`
 
-	// Parent PVCBackup reference
+	// Parent BackupConfig reference
 	// +required
-	PVCBackupRef corev1.LocalObjectReference `json:"pvcBackupRef"`
+	BackupConfigRef corev1.LocalObjectReference `json:"backupConfigRef"`
 
 	// Backup type (manual, scheduled)
 	// +optional
 	BackupType string `json:"backupType,omitempty"`
 }
 
-// PVCBackupJobStatus defines the observed state of PVCBackupJob
-type PVCBackupJobStatus struct {
+// BackupJobStatus defines the observed state of BackupJob
+type BackupJobStatus struct {
 	// Current phase of the backup job
 	// +optional
 	Phase string `json:"phase,omitempty"`
@@ -88,32 +88,32 @@ type PVCBackupJobStatus struct {
 // +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.size"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// PVCBackupJob is the Schema for the pvcbackupjobs API
-type PVCBackupJob struct {
+// BackupJob is the Schema for the backupjobs API
+type BackupJob struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec defines the desired state of PVCBackupJob
+	// spec defines the desired state of BackupJob
 	// +required
-	Spec PVCBackupJobSpec `json:"spec"`
+	Spec BackupJobSpec `json:"spec"`
 
-	// status defines the observed state of PVCBackupJob
+	// status defines the observed state of BackupJob
 	// +optional
-	Status PVCBackupJobStatus `json:"status,omitempty"`
+	Status BackupJobStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// PVCBackupJobList contains a list of PVCBackupJob
-type PVCBackupJobList struct {
+// BackupJobList contains a list of BackupJob
+type BackupJobList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PVCBackupJob `json:"items"`
+	Items           []BackupJob `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&PVCBackupJob{}, &PVCBackupJobList{})
+	SchemeBuilder.Register(&BackupJob{}, &BackupJobList{})
 }

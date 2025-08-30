@@ -31,20 +31,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 )
 
-// PVCBackupRestoreJobReconciler reconciles a PVCBackupRestoreJob object
-type PVCBackupRestoreJobReconciler struct {
+// RestoreJobReconciler reconciles a RestoreJob object
+type RestoreJobReconciler struct {
 	client.Client
 	Scheme      *runtime.Scheme
 	resticJob   *ResticJob
 	typedClient kubernetes.Interface
 }
 
-// NewPVCBackupRestoreJobReconciler creates a new PVCBackupRestoreJobReconciler
-func NewPVCBackupRestoreJobReconciler(client client.Client, scheme *runtime.Scheme, typedClient kubernetes.Interface) *PVCBackupRestoreJobReconciler {
-	return &PVCBackupRestoreJobReconciler{
+// NewRestoreJobReconciler creates a new RestoreJobReconciler
+func NewRestoreJobReconciler(client client.Client, scheme *runtime.Scheme, typedClient kubernetes.Interface) *RestoreJobReconciler {
+	return &RestoreJobReconciler{
 		Client:      client,
 		Scheme:      scheme,
 		resticJob:   NewResticJob(client, typedClient),
@@ -52,26 +52,26 @@ func NewPVCBackupRestoreJobReconciler(client client.Client, scheme *runtime.Sche
 	}
 }
 
-// +kubebuilder:rbac:groups=storage.cheap-man-ha-store.com,resources=pvcbackuprestorejobs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=storage.cheap-man-ha-store.com,resources=pvcbackuprestorejobs/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=storage.cheap-man-ha-store.com,resources=pvcbackuprestorejobs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=restorejobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=restorejobs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=restorejobs/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get;list
 
 // Reconcile is part of the main kubernetes reconciliation loop
-func (r *PVCBackupRestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *RestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "restore-job").
 		WithValues("name", req.Name, "namespace", req.Namespace)
 
 	logger.Starting("reconcile")
 
-	// Fetch the PVCBackupRestoreJob instance
-	restoreJob := &storagev1alpha1.PVCBackupRestoreJob{}
+	// Fetch the RestoreJob instance
+	restoreJob := &backupv1alpha1.RestoreJob{}
 	if err := r.Get(ctx, req.NamespacedName, restoreJob); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Debug("PVCBackupRestoreJob not found")
+			logger.Debug("RestoreJob not found")
 			return ctrl.Result{}, nil
 		}
 		logger.Failed("get restore job", err)
@@ -80,12 +80,12 @@ func (r *PVCBackupRestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.
 
 	// Handle finalizer
 	if restoreJob.DeletionTimestamp != nil {
-		if controllerutil.ContainsFinalizer(restoreJob, "pvcbackuprestorejob.cheap-man-ha-store.com/finalizer") {
+		if controllerutil.ContainsFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer") {
 			if err := r.handleCleanup(ctx, restoreJob); err != nil {
 				logger.Failed("cleanup", err)
 				return ctrl.Result{RequeueAfter: time.Minute}, err
 			}
-			controllerutil.RemoveFinalizer(restoreJob, "pvcbackuprestorejob.cheap-man-ha-store.com/finalizer")
+			controllerutil.RemoveFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer")
 			if err := r.Update(ctx, restoreJob); err != nil {
 				logger.Failed("remove finalizer", err)
 				return ctrl.Result{}, err
@@ -95,8 +95,8 @@ func (r *PVCBackupRestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(restoreJob, "pvcbackuprestorejob.cheap-man-ha-store.com/finalizer") {
-		controllerutil.AddFinalizer(restoreJob, "pvcbackuprestorejob.cheap-man-ha-store.com/finalizer")
+	if !controllerutil.ContainsFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer") {
+		controllerutil.AddFinalizer(restoreJob, "restorejob.backup.autorestore-backup-operator.com/finalizer")
 		if err := r.Update(ctx, restoreJob); err != nil {
 			logger.Failed("add finalizer", err)
 			return ctrl.Result{}, err
@@ -120,7 +120,7 @@ func (r *PVCBackupRestoreJobReconciler) Reconcile(ctx context.Context, req ctrl.
 }
 
 // handlePendingRestore starts the restore process
-func (r *PVCBackupRestoreJobReconciler) handlePendingRestore(ctx context.Context, restoreJob *storagev1alpha1.PVCBackupRestoreJob) (ctrl.Result, error) {
+func (r *RestoreJobReconciler) handlePendingRestore(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "restore-job").
 		WithValues("name", restoreJob.Name)
 
@@ -139,8 +139,8 @@ func (r *PVCBackupRestoreJobReconciler) handlePendingRestore(ctx context.Context
 	// Determine backup ID to restore
 	backupID := restoreJob.Spec.BackupID
 	if backupID == "" && restoreJob.Spec.BackupJobRef != nil {
-		// Get backup ID from referenced PVCBackupJob
-		backupJob := &storagev1alpha1.PVCBackupJob{}
+		// Get backup ID from referenced BackupJob
+		backupJob := &backupv1alpha1.BackupJob{}
 		if err := r.Get(ctx, client.ObjectKey{
 			Name:      restoreJob.Spec.BackupJobRef.Name,
 			Namespace: restoreJob.Namespace,
@@ -155,25 +155,25 @@ func (r *PVCBackupRestoreJobReconciler) handlePendingRestore(ctx context.Context
 		// Find latest backup automatically using disaster recovery approach
 		var err error
 
-		// Try to find a PVCBackup resource for this restore job
-		var pvcBackup *storagev1alpha1.PVCBackup
-		if restoreJob.Spec.PVCBackupRef.Name != "" {
-			pvcBackup = &storagev1alpha1.PVCBackup{}
+		// Try to find a BackupConfig resource for this restore job
+		var pvcBackup *backupv1alpha1.BackupConfig
+		if restoreJob.Spec.BackupConfigRef.Name != "" {
+			pvcBackup = &backupv1alpha1.BackupConfig{}
 			if getErr := r.Get(ctx, client.ObjectKey{
-				Name:      restoreJob.Spec.PVCBackupRef.Name,
+				Name:      restoreJob.Spec.BackupConfigRef.Name,
 				Namespace: restoreJob.Namespace,
 			}, pvcBackup); getErr != nil {
-				logger.WithValues("error", getErr).Debug("PVCBackup not found, using disaster recovery mode")
+				logger.WithValues("error", getErr).Debug("BackupConfig not found, using disaster recovery mode")
 				pvcBackup = nil
 			}
 		}
 
 		if pvcBackup != nil {
-			// Normal mode - use existing PVCBackup
+			// Normal mode - use existing BackupConfig
 			backupID, err = r.resticJob.FindLatestBackup(ctx, pvcBackup, *pvc)
 		} else {
 			// Disaster recovery mode - use backup target from restore job spec
-			backupID, err = r.resticJob.FindLatestBackupForDisasterRecovery(ctx, *pvc, []storagev1alpha1.BackupTarget{restoreJob.Spec.BackupTarget})
+			backupID, err = r.resticJob.FindLatestBackupForDisasterRecovery(ctx, *pvc, []backupv1alpha1.BackupTarget{restoreJob.Spec.BackupTarget})
 		}
 
 		if err != nil {
@@ -239,7 +239,7 @@ func (r *PVCBackupRestoreJobReconciler) handlePendingRestore(ctx context.Context
 }
 
 // handleRunningRestore monitors the running restore job
-func (r *PVCBackupRestoreJobReconciler) handleRunningRestore(ctx context.Context, restoreJob *storagev1alpha1.PVCBackupRestoreJob) (ctrl.Result, error) {
+func (r *RestoreJobReconciler) handleRunningRestore(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "restore-job").
 		WithValues("name", restoreJob.Name)
 
@@ -288,7 +288,7 @@ func (r *PVCBackupRestoreJobReconciler) handleRunningRestore(ctx context.Context
 }
 
 // createRestoreJob creates a Kubernetes Job to perform the restore
-func (r *PVCBackupRestoreJobReconciler) createRestoreJob(ctx context.Context, restoreJob *storagev1alpha1.PVCBackupRestoreJob, pvc corev1.PersistentVolumeClaim, backupID string) (*batchv1.Job, error) {
+func (r *RestoreJobReconciler) createRestoreJob(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob, pvc corev1.PersistentVolumeClaim, backupID string) (*batchv1.Job, error) {
 	// Build restic restore command
 	args := []string{
 		"restore", backupID,
@@ -300,7 +300,7 @@ func (r *PVCBackupRestoreJobReconciler) createRestoreJob(ctx context.Context, re
 }
 
 // updateStatusWithError updates the status with error information
-func (r *PVCBackupRestoreJobReconciler) updateStatusWithError(ctx context.Context, restoreJob *storagev1alpha1.PVCBackupRestoreJob, message string, err error) (ctrl.Result, error) {
+func (r *RestoreJobReconciler) updateStatusWithError(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob, message string, err error) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "restore-job").
 		WithValues("name", restoreJob.Name)
 
@@ -318,7 +318,7 @@ func (r *PVCBackupRestoreJobReconciler) updateStatusWithError(ctx context.Contex
 }
 
 // updateStatusWithErrorAndRestoreStatus updates the status with error information and restore status
-func (r *PVCBackupRestoreJobReconciler) updateStatusWithErrorAndRestoreStatus(ctx context.Context, restoreJob *storagev1alpha1.PVCBackupRestoreJob, message string, err error, restoreStatus string) (ctrl.Result, error) {
+func (r *RestoreJobReconciler) updateStatusWithErrorAndRestoreStatus(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob, message string, err error, restoreStatus string) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "restore-job").
 		WithValues("name", restoreJob.Name)
 
@@ -337,7 +337,7 @@ func (r *PVCBackupRestoreJobReconciler) updateStatusWithErrorAndRestoreStatus(ct
 }
 
 // handleCleanup cleans up resources when the restore job is deleted
-func (r *PVCBackupRestoreJobReconciler) handleCleanup(ctx context.Context, restoreJob *storagev1alpha1.PVCBackupRestoreJob) error {
+func (r *RestoreJobReconciler) handleCleanup(ctx context.Context, restoreJob *backupv1alpha1.RestoreJob) error {
 	logger := LoggerFrom(ctx, "restore-job").
 		WithValues("name", restoreJob.Name)
 
@@ -366,9 +366,9 @@ func (r *PVCBackupRestoreJobReconciler) handleCleanup(ctx context.Context, resto
 }
 
 // SetupWithManager sets up the controller with the Manager
-func (r *PVCBackupRestoreJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *RestoreJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&storagev1alpha1.PVCBackupRestoreJob{}).
+		For(&backupv1alpha1.RestoreJob{}).
 		Owns(&batchv1.Job{}).
 		Complete(r)
 }

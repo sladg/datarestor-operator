@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,7 +14,7 @@ import (
 )
 
 // Unified helper for creating restic jobs (backup/restore)
-func (r *PVCBackupReconciler) createResticJob(ctx context.Context, pvc corev1.PersistentVolumeClaim, pvcBackup *storagev1alpha1.PVCBackup, jobType string, resticArgs []string) (*batchv1.Job, error) {
+func (r *BackupConfigReconciler) createResticJob(ctx context.Context, pvc corev1.PersistentVolumeClaim, pvcBackup *backupv1alpha1.BackupConfig, jobType string, resticArgs []string) (*batchv1.Job, error) {
 	logger := LoggerFrom(ctx, "job").
 		WithPVC(pvc).
 		WithValues("type", jobType)
@@ -24,7 +24,7 @@ func (r *PVCBackupReconciler) createResticJob(ctx context.Context, pvc corev1.Pe
 	jobName := fmt.Sprintf("%s-%s-%s", jobType, pvc.Name, time.Now().Format("20060102-150405"))
 	logger.WithValues("name", jobName).Debug("Generated job name")
 
-	resticTarget := (*storagev1alpha1.BackupTarget)(nil)
+	resticTarget := (*backupv1alpha1.BackupTarget)(nil)
 	if pvcBackup != nil {
 		for _, target := range pvcBackup.Spec.BackupTargets {
 			if target.Restic != nil {
@@ -60,9 +60,9 @@ func (r *PVCBackupReconciler) createResticJob(ctx context.Context, pvc corev1.Pe
 	}
 
 	labels := map[string]string{
-		"pvcbackup.cheap-man-ha-store.com/restic-job": jobType,
-		"pvcbackup.cheap-man-ha-store.com/pvc-name":   pvc.Name,
-		"pvcbackup.cheap-man-ha-store.com/created-by": resticTarget.Name,
+		"backupconfig.autorestore-backup-operator.com/restic-job": jobType,
+		"backupconfig.autorestore-backup-operator.com/pvc-name":   pvc.Name,
+		"backupconfig.autorestore-backup-operator.com/created-by": resticTarget.Name,
 	}
 
 	job := &batchv1.Job{
@@ -158,7 +158,7 @@ func (r *PVCBackupReconciler) createResticJob(ctx context.Context, pvc corev1.Pe
 }
 
 // Unified wait for job completion
-func (r *PVCBackupReconciler) waitForJobCompletion(ctx context.Context, job *batchv1.Job) error {
+func (r *BackupConfigReconciler) waitForJobCompletion(ctx context.Context, job *batchv1.Job) error {
 	logger := LoggerFrom(ctx, "job").
 		WithValues(
 			"name", job.Name,

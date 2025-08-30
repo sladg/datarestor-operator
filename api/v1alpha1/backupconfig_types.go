@@ -108,8 +108,8 @@ type BackupSchedule struct {
 	WaitForHealthy bool `json:"waitForHealthy,omitempty"`
 }
 
-// PVCBackupSpec defines the desired state of PVCBackup
-type PVCBackupSpec struct {
+// BackupConfigSpec defines the desired state of BackupConfig
+type BackupConfigSpec struct {
 	// PVC selector configuration
 	// +required
 	PVCSelector PVCSelector `json:"pvcSelector"`
@@ -185,8 +185,8 @@ type ResticConfig struct {
 	Image string `json:"image,omitempty"`
 }
 
-// PVCBackupStatus defines the observed state of PVCBackup.
-type PVCBackupStatus struct {
+// BackupConfigStatus defines the observed state of BackupConfig.
+type BackupConfigStatus struct {
 	// List of PVCs being managed
 	// +optional
 	ManagedPVCs []string `json:"managedPVCs,omitempty"`
@@ -273,32 +273,32 @@ type JobStatistics struct {
 // +kubebuilder:printcolumn:name="Restore Success",type="integer",JSONPath=".status.restoreJobs.successful"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// PVCBackup is the Schema for the pvcbackups API
-type PVCBackup struct {
+// BackupConfig is the Schema for the backupconfigs API
+type BackupConfig struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty,omitzero"`
 
-	// spec defines the desired state of PVCBackup
+	// spec defines the desired state of BackupConfig
 	// +required
-	Spec PVCBackupSpec `json:"spec"`
+	Spec BackupConfigSpec `json:"spec"`
 
-	// status defines the observed state of PVCBackup
+	// status defines the observed state of BackupConfig
 	// +optional
-	Status PVCBackupStatus `json:"status,omitempty,omitzero"`
+	Status BackupConfigStatus `json:"status,omitempty,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// PVCBackupList contains a list of PVCBackup
-type PVCBackupList struct {
+// BackupConfigList contains a list of BackupConfig
+type BackupConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PVCBackup `json:"items"`
+	Items           []BackupConfig `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&PVCBackup{}, &PVCBackupList{})
+	SchemeBuilder.Register(&BackupConfig{}, &BackupConfigList{})
 }

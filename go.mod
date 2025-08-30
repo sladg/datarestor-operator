@@ -1,4 +1,4 @@
-module github.com/cheap-man-ha-store/cheap-man-ha-store
+module github.com/sladg/autorestore-backup-operator
 
 go 1.24.0
 

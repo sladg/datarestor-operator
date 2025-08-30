@@ -20,8 +20,8 @@ resources:
   - metrics_reader_role.yaml
   # For each CRD, "Admin", "Editor" and "Viewer" roles are scaffolded by
   # default, aiding admins in cluster management. Those roles are
-  # not used by the cheap-man-ha-store itself. You can comment the following lines
+  # not used by the autorestore-backup-operator itself. You can comment the following lines
   # if you do not want those helpers be installed with your Project.
-  - pvcbackup_admin_role.yaml
-  - pvcbackup_editor_role.yaml
-  - pvcbackup_viewer_role.yaml
+  - backupconfig_admin_role.yaml
+  - backupconfig_editor_role.yaml
+  - backupconfig_viewer_role.yaml

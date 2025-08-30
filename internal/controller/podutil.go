@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-func (r *PVCBackupReconciler) isPodHealthy(pod *corev1.Pod) bool {
+func (r *BackupConfigReconciler) isPodHealthy(pod *corev1.Pod) bool {
 	if pod.Status.Phase != corev1.PodRunning {
 		return false
 	}
@@ -28,7 +28,7 @@ func (r *PVCBackupReconciler) isPodHealthy(pod *corev1.Pod) bool {
 }
 
 // startPodsAfterBackup starts pods that were stopped for backup
-func (r *PVCBackupReconciler) startPodsAfterBackup(ctx context.Context, pvc corev1.PersistentVolumeClaim) error {
+func (r *BackupConfigReconciler) startPodsAfterBackup(ctx context.Context, pvc corev1.PersistentVolumeClaim) error {
 	logger := LoggerFrom(ctx, "pod").
 		WithPVC(pvc)
 
@@ -83,7 +83,7 @@ func (r *PVCBackupReconciler) startPodsAfterBackup(ctx context.Context, pvc core
 }
 
 // stopPodsForBackup stops pods using the PVC for data integrity during backup
-func (r *PVCBackupReconciler) stopPodsForBackup(ctx context.Context, pvc corev1.PersistentVolumeClaim) error {
+func (r *BackupConfigReconciler) stopPodsForBackup(ctx context.Context, pvc corev1.PersistentVolumeClaim) error {
 	logger := LoggerFrom(ctx, "pod").
 		WithPVC(pvc)
 
@@ -137,7 +137,7 @@ func (r *PVCBackupReconciler) stopPodsForBackup(ctx context.Context, pvc corev1.
 	return nil
 }
 
-func (r *PVCBackupReconciler) cleanupBackupPod(ctx context.Context, pod *corev1.Pod) {
+func (r *BackupConfigReconciler) cleanupBackupPod(ctx context.Context, pod *corev1.Pod) {
 	logger := LoggerFrom(ctx, "pod").
 		WithValues("pod", pod.Name)
 
@@ -149,7 +149,7 @@ func (r *PVCBackupReconciler) cleanupBackupPod(ctx context.Context, pod *corev1.
 	}
 }
 
-func (r *PVCBackupReconciler) waitForPodReady(ctx context.Context, pod *corev1.Pod) error {
+func (r *BackupConfigReconciler) waitForPodReady(ctx context.Context, pod *corev1.Pod) error {
 	logger := LoggerFrom(ctx, "pod").
 		WithValues("pod", pod.Name)
 
@@ -190,8 +190,8 @@ func (r *PVCBackupReconciler) waitForPodReady(ctx context.Context, pod *corev1.P
 	}
 }
 
-// findObjectsForPod finds PVCBackup objects for a given Pod
-func (r *PVCBackupReconciler) findObjectsForPod(ctx context.Context, obj client.Object) []reconcile.Request {
+// findObjectsForPod finds BackupConfig objects for a given Pod
+func (r *BackupConfigReconciler) findObjectsForPod(ctx context.Context, obj client.Object) []reconcile.Request {
 	pod := obj.(*corev1.Pod)
 
 	// Find PVCs used by the pod
@@ -206,7 +206,7 @@ func (r *PVCBackupReconciler) findObjectsForPod(ctx context.Context, obj client.
 		return nil
 	}
 
-	var pvcBackups storagev1alpha1.PVCBackupList
+	var pvcBackups backupv1alpha1.BackupConfigList
 	if err := r.List(ctx, &pvcBackups); err != nil {
 		return nil
 	}

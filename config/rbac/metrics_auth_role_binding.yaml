@@ -9,4 +9,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: controller-manager
-    namespace: cheap-man-ha-store-system
+    namespace: autorestore-backup-operator-system

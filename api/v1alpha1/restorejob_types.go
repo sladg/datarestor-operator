@@ -21,13 +21,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PVCBackupRestoreJobSpec defines the desired state of PVCBackupRestoreJob
-type PVCBackupRestoreJobSpec struct {
+// RestoreJobSpec defines the desired state of RestoreJob
+type RestoreJobSpec struct {
 	// Reference to the PVC to restore data into
 	// +required
 	PVCRef corev1.LocalObjectReference `json:"pvcRef"`
 
-	// Reference to the backup source (either PVCBackupJob or manual backup ID)
+	// Reference to the backup source (either BackupJob or manual backup ID)
 	// +optional
 	BackupJobRef *corev1.LocalObjectReference `json:"backupJobRef,omitempty"`
 
@@ -39,9 +39,9 @@ type PVCBackupRestoreJobSpec struct {
 	// +required
 	BackupTarget BackupTarget `json:"backupTarget"`
 
-	// Reference to the parent PVCBackup resource
+	// Reference to the parent BackupConfig resource
 	// +optional
-	PVCBackupRef corev1.LocalObjectReference `json:"pvcBackupRef,omitempty"`
+	BackupConfigRef corev1.LocalObjectReference `json:"backupConfigRef,omitempty"`
 
 	// Type of restore operation (manual, automated)
 	// +required
@@ -53,8 +53,8 @@ type PVCBackupRestoreJobSpec struct {
 	OverwriteExisting bool `json:"overwriteExisting,omitempty"`
 }
 
-// PVCBackupRestoreJobStatus defines the observed state of PVCBackupRestoreJob
-type PVCBackupRestoreJobStatus struct {
+// RestoreJobStatus defines the observed state of RestoreJob
+type RestoreJobStatus struct {
 	// Current phase of the restore job (Pending, Running, Completed, Failed)
 	// +optional
 	Phase string `json:"phase,omitempty"`
@@ -108,24 +108,24 @@ type PVCBackupRestoreJobStatus struct {
 // +kubebuilder:printcolumn:name="Backup ID",type="string",JSONPath=".status.restoredBackupID"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// PVCBackupRestoreJob is the Schema for the pvcbackuprestorejobs API
-type PVCBackupRestoreJob struct {
+// RestoreJob is the Schema for the restorejobs API
+type RestoreJob struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PVCBackupRestoreJobSpec   `json:"spec,omitempty"`
-	Status PVCBackupRestoreJobStatus `json:"status,omitempty"`
+	Spec   RestoreJobSpec   `json:"spec,omitempty"`
+	Status RestoreJobStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// PVCBackupRestoreJobList contains a list of PVCBackupRestoreJob
-type PVCBackupRestoreJobList struct {
+// RestoreJobList contains a list of RestoreJob
+type RestoreJobList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PVCBackupRestoreJob `json:"items"`
+	Items           []RestoreJob `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&PVCBackupRestoreJob{}, &PVCBackupRestoreJobList{})
+	SchemeBuilder.Register(&RestoreJob{}, &RestoreJobList{})
 }

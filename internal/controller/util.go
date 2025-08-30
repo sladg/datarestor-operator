@@ -5,22 +5,22 @@ import (
 	"fmt"
 	"time"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func (r *PVCBackupReconciler) isPVCNew(pvc corev1.PersistentVolumeClaim) bool {
+func (r *BackupConfigReconciler) isPVCNew(pvc corev1.PersistentVolumeClaim) bool {
 	return time.Since(pvc.CreationTimestamp.Time) < 5*time.Minute
 }
 
-func (r *PVCBackupReconciler) shouldRestorePVC(pvc corev1.PersistentVolumeClaim) bool {
+func (r *BackupConfigReconciler) shouldRestorePVC(pvc corev1.PersistentVolumeClaim) bool {
 	return pvc.Labels["backup.restore"] == "true"
 }
 
-func (r *PVCBackupReconciler) updateManagedPVCsStatus(ctx context.Context, pvcBackup *storagev1alpha1.PVCBackup, pvcs []corev1.PersistentVolumeClaim) error {
+func (r *BackupConfigReconciler) updateManagedPVCsStatus(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig, pvcs []corev1.PersistentVolumeClaim) error {
 	logger := LoggerFrom(ctx, "status").
 		WithValues("name", pvcBackup.Name)
 
@@ -52,7 +52,7 @@ func containsFinalizer(obj metav1.Object, finalizer string) bool {
 }
 
 // getOwnerReference gets the owner reference of a pod
-func (r *PVCBackupReconciler) getOwnerReference(pod *corev1.Pod) *metav1.OwnerReference {
+func (r *BackupConfigReconciler) getOwnerReference(pod *corev1.Pod) *metav1.OwnerReference {
 	if len(pod.OwnerReferences) == 0 {
 		return nil
 	}
@@ -62,7 +62,7 @@ func (r *PVCBackupReconciler) getOwnerReference(pod *corev1.Pod) *metav1.OwnerRe
 }
 
 // scaleDownResource scales down a resource to 0 replicas
-func (r *PVCBackupReconciler) scaleDownResource(ctx context.Context, ownerRef *metav1.OwnerReference, pod *corev1.Pod) error {
+func (r *BackupConfigReconciler) scaleDownResource(ctx context.Context, ownerRef *metav1.OwnerReference, pod *corev1.Pod) error {
 	logger := LoggerFrom(ctx, "scale").
 		WithValues(
 			"pod", pod.Name,
@@ -95,7 +95,7 @@ func (r *PVCBackupReconciler) scaleDownResource(ctx context.Context, ownerRef *m
 }
 
 // scaleUpResource scales up a resource to its original replica count
-func (r *PVCBackupReconciler) scaleUpResource(ctx context.Context, ownerRef *metav1.OwnerReference, pod *corev1.Pod) error {
+func (r *BackupConfigReconciler) scaleUpResource(ctx context.Context, ownerRef *metav1.OwnerReference, pod *corev1.Pod) error {
 	logger := LoggerFrom(ctx, "scale").
 		WithValues(
 			"pod", pod.Name,
@@ -130,7 +130,7 @@ func (r *PVCBackupReconciler) scaleUpResource(ctx context.Context, ownerRef *met
 }
 
 // scaleDeployment scales a deployment to the specified replica count
-func (r *PVCBackupReconciler) scaleDeployment(ctx context.Context, ownerRef *metav1.OwnerReference, namespace string, replicas int32) error {
+func (r *BackupConfigReconciler) scaleDeployment(ctx context.Context, ownerRef *metav1.OwnerReference, namespace string, replicas int32) error {
 	logger := LoggerFrom(ctx, "scale").
 		WithValues(
 			"kind", "Deployment",
@@ -158,7 +158,7 @@ func (r *PVCBackupReconciler) scaleDeployment(ctx context.Context, ownerRef *met
 }
 
 // scaleStatefulSet scales a statefulset to the specified replica count
-func (r *PVCBackupReconciler) scaleStatefulSet(ctx context.Context, ownerRef *metav1.OwnerReference, namespace string, replicas int32) error {
+func (r *BackupConfigReconciler) scaleStatefulSet(ctx context.Context, ownerRef *metav1.OwnerReference, namespace string, replicas int32) error {
 	logger := LoggerFrom(ctx, "scale").
 		WithValues(
 			"kind", "StatefulSet",
@@ -186,7 +186,7 @@ func (r *PVCBackupReconciler) scaleStatefulSet(ctx context.Context, ownerRef *me
 }
 
 // scaleReplicaSet scales a replicaset to the specified replica count
-func (r *PVCBackupReconciler) scaleReplicaSet(ctx context.Context, ownerRef *metav1.OwnerReference, namespace string, replicas int32) error {
+func (r *BackupConfigReconciler) scaleReplicaSet(ctx context.Context, ownerRef *metav1.OwnerReference, namespace string, replicas int32) error {
 	logger := LoggerFrom(ctx, "scale").
 		WithValues(
 			"kind", "ReplicaSet",

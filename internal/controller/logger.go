@@ -7,7 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 )
 
 // LogLevel represents the verbosity level of logging
@@ -65,7 +65,7 @@ func (l *Logger) WithValues(keysAndValues ...interface{}) *Logger {
 // WithJob adds backup job information to the logger
 func (l *Logger) WithJob(job interface{}) *Logger {
 	switch v := job.(type) {
-	case *storagev1alpha1.PVCBackupJob:
+	case *backupv1alpha1.BackupJob:
 		values := []interface{}{
 			"job_name", v.Name,
 			"job_namespace", v.Namespace,
@@ -88,7 +88,7 @@ func (l *Logger) WithJob(job interface{}) *Logger {
 
 		return l.WithValues(values...)
 
-	case *storagev1alpha1.PVCBackupRestoreJob:
+	case *backupv1alpha1.RestoreJob:
 		values := []interface{}{
 			"job_name", v.Name,
 			"job_namespace", v.Namespace,

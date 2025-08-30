@@ -72,7 +72,7 @@ spec:
   storageClassName: openebs-hostpath
 ---
 # Combined Backup Configuration with Multiple Targets
-apiVersion: storage.cheap-man-ha-store.com/v1alpha1
+apiVersion: backup.autorestore-backup-operator.com/v1alpha1
 kind: PVCBackup
 metadata:
   name: test-combined-backup

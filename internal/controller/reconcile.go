@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 )
 
 // calculateNextBackupTime calculates the next backup time based on cron schedule
-func (r *PVCBackupReconciler) calculateNextBackupTime(cronExpression string) (time.Time, error) {
+func (r *BackupConfigReconciler) calculateNextBackupTime(cronExpression string) (time.Time, error) {
 	if cronExpression == "" {
 		return time.Time{}, fmt.Errorf("cron expression is empty")
 	}
@@ -24,7 +24,7 @@ func (r *PVCBackupReconciler) calculateNextBackupTime(cronExpression string) (ti
 }
 
 // calculateNextReconcile calculates when the next reconciliation should occur
-func (r *PVCBackupReconciler) calculateNextReconcile(pvcBackup *storagev1alpha1.PVCBackup) (time.Duration, error) {
+func (r *BackupConfigReconciler) calculateNextReconcile(pvcBackup *backupv1alpha1.BackupConfig) (time.Duration, error) {
 	logger := LoggerFrom(context.Background(), "schedule").
 		WithValues("name", pvcBackup.Name)
 

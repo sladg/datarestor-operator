@@ -3,10 +3,10 @@ kind: Service
 metadata:
   labels:
     control-plane: controller-manager
-    app.kubernetes.io/name: cheap-man-ha-store
+    app.kubernetes.io/name: autorestore-backup-operator
     app.kubernetes.io/managed-by: kustomize
   name: controller-manager-metrics-service
-  namespace: cheap-man-ha-store-system
+  namespace: autorestore-backup-operator-system
 spec:
   ports:
     - name: https
@@ -15,4 +15,4 @@ spec:
       targetPort: 8443
   selector:
     control-plane: controller-manager
-    app.kubernetes.io/name: cheap-man-ha-store
+    app.kubernetes.io/name: autorestore-backup-operator

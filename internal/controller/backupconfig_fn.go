@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	storagev1alpha1 "github.com/cheap-man-ha-store/cheap-man-ha-store/api/v1alpha1"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v6/apis/volumesnapshot/v1"
+	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -15,17 +15,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// cleanupResources cleans up resources created by the PVCBackup
-func (r *PVCBackupReconciler) cleanupResources(ctx context.Context, pvcBackup *storagev1alpha1.PVCBackup) error {
+// cleanupResources cleans up resources created by the BackupConfig
+func (r *BackupConfigReconciler) cleanupResources(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig) error {
 	logger := LoggerFrom(ctx, "cleanup").
 		WithValues("name", pvcBackup.Name)
 
-	// Clean up VolumeSnapshots created by this PVCBackup (if available)
+	// Clean up VolumeSnapshots created by this BackupConfig (if available)
 	if r.isVolumeSnapshotAvailable(ctx) {
 		logger.Starting("cleanup snapshots")
 		var snapshots snapshotv1.VolumeSnapshotList
 		if err := r.List(ctx, &snapshots, client.MatchingLabels(map[string]string{
-			"pvcbackup.cheap-man-ha-store.com/created-by": pvcBackup.Name,
+			"backupconfig.autorestore-backup-operator.com/created-by": pvcBackup.Name,
 		})); err != nil {
 			logger.Failed("list snapshots", err)
 		} else {
@@ -44,11 +44,11 @@ func (r *PVCBackupReconciler) cleanupResources(ctx context.Context, pvcBackup *s
 		logger.Debug("VolumeSnapshot CRD not available")
 	}
 
-	// Clean up backup pods created by this PVCBackup
+	// Clean up backup pods created by this BackupConfig
 	var pods corev1.PodList
 	logger.Starting("cleanup pods")
 	if err := r.List(ctx, &pods, client.MatchingLabels(map[string]string{
-		"pvcbackup.cheap-man-ha-store.com/created-by": pvcBackup.Name,
+		"backupconfig.autorestore-backup-operator.com/created-by": pvcBackup.Name,
 	})); err != nil {
 		logger.Failed("list pods", err)
 	} else {
@@ -68,14 +68,14 @@ func (r *PVCBackupReconciler) cleanupResources(ctx context.Context, pvcBackup *s
 }
 
 // Helper functions (implementations would go here)
-// handleDeletion handles cleanup when PVCBackup is being deleted
-func (r *PVCBackupReconciler) handleDeletion(ctx context.Context, pvcBackup *storagev1alpha1.PVCBackup) (ctrl.Result, error) {
+// handleDeletion handles cleanup when BackupConfig is being deleted
+func (r *BackupConfigReconciler) handleDeletion(ctx context.Context, pvcBackup *backupv1alpha1.BackupConfig) (ctrl.Result, error) {
 	logger := LoggerFrom(ctx, "deletion").
 		WithValues("name", pvcBackup.Name)
 
 	logger.Starting("deletion")
 
-	// Clean up any resources created by this PVCBackup
+	// Clean up any resources created by this BackupConfig
 	if err := r.cleanupResources(ctx, pvcBackup); err != nil {
 		logger.Failed("cleanup resources", err)
 		// Don't return error to avoid blocking deletion
@@ -83,7 +83,7 @@ func (r *PVCBackupReconciler) handleDeletion(ctx context.Context, pvcBackup *sto
 
 	// Remove finalizer
 	logger.Debug("Removing finalizer")
-	controllerutil.RemoveFinalizer(pvcBackup, "pvcbackup.storage.cheap-man-ha-store.com/finalizer")
+	controllerutil.RemoveFinalizer(pvcBackup, "backupconfig.backup.autorestore-backup-operator.com/finalizer")
 	if err := r.Update(ctx, pvcBackup); err != nil {
 		logger.Failed("remove finalizer", err)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -94,7 +94,7 @@ func (r *PVCBackupReconciler) handleDeletion(ctx context.Context, pvcBackup *sto
 }
 
 // isVolumeSnapshotAvailable checks if VolumeSnapshot CRD is available
-func (r *PVCBackupReconciler) isVolumeSnapshotAvailable(ctx context.Context) bool {
+func (r *BackupConfigReconciler) isVolumeSnapshotAvailable(ctx context.Context) bool {
 	config := ctrl.GetConfigOrDie()
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
@@ -116,7 +116,7 @@ func (r *PVCBackupReconciler) isVolumeSnapshotAvailable(ctx context.Context) boo
 }
 
 // shouldPerformBackup checks if it's time to perform a backup based on schedule
-func (r *PVCBackupReconciler) shouldPerformBackup(pvcBackup *storagev1alpha1.PVCBackup) bool {
+func (r *BackupConfigReconciler) shouldPerformBackup(pvcBackup *backupv1alpha1.BackupConfig) bool {
 	// If no cron schedule, only perform manual backups
 	if pvcBackup.Spec.Schedule.Cron == "" {
 		return false

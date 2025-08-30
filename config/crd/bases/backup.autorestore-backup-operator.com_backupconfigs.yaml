@@ -4,28 +4,34 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: pvcbackups.storage.cheap-man-ha-store.com
+  name: backupconfigs.backup.autorestore-backup-operator.com
 spec:
-  group: storage.cheap-man-ha-store.com
+  group: backup.autorestore-backup-operator.com
   names:
-    kind: PVCBackup
-    listKind: PVCBackupList
-    plural: pvcbackups
-    singular: pvcbackup
+    kind: BackupConfig
+    listKind: BackupConfigList
+    plural: backupconfigs
+    singular: backupconfig
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.backupStatus
-      name: Status
-      type: string
-    - jsonPath: .status.lastBackup
-      name: Last Backup
-      type: date
-    - jsonPath: .status.nextBackup
-      name: Next Backup
-      type: date
-    - jsonPath: .status.managedPVCs
+    - jsonPath: .status.matchingPVCs
       name: PVCs
+      type: integer
+    - jsonPath: .status.backupTargets
+      name: Targets
+      type: integer
+    - jsonPath: .status.backupJobs.successful
+      name: Backup Success
+      type: integer
+    - jsonPath: .status.backupJobs.running
+      name: Backup Running
+      type: integer
+    - jsonPath: .status.backupJobs.failed
+      name: Backup Failed
+      type: integer
+    - jsonPath: .status.restoreJobs.successful
+      name: Restore Success
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -33,7 +39,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: PVCBackup is the Schema for the pvcbackups API
+        description: BackupConfig is the Schema for the backupconfigs API
         properties:
           apiVersion:
             description: |-
@@ -53,7 +59,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of PVCBackup
+            description: spec defines the desired state of BackupConfig
             properties:
               autoRestore:
                 description: Whether to enable automatic restore for new PVCs
@@ -224,8 +230,11 @@ spec:
                         host:
                           description: Hostname for backup identification
                           type: string
+                        image:
+                          description: Image for the restic job
+                          type: string
                         password:
-                          description: Restic password for repository encryption
+                          description: Password for restic repository
                           type: string
                         repository:
                           description: Restic repository URL (e.g., s3:s3.amazonaws.com/bucket,
@@ -237,7 +246,6 @@ spec:
                             type: string
                           type: array
                       required:
-                      - password
                       - repository
                       type: object
                     retention:
@@ -278,6 +286,11 @@ spec:
                 required:
                 - image
                 type: object
+              manualBackup:
+                description: Manual backup trigger. If set to true, a backup will
+                  be triggered immediately and the field will be reset to false after
+                  completion.
+                type: boolean
               pvcSelector:
                 description: PVC selector configuration
                 properties:
@@ -470,8 +483,11 @@ spec:
                   host:
                     description: Hostname for backup identification
                     type: string
+                  image:
+                    description: Image for the restic job
+                    type: string
                   password:
-                    description: Restic password for repository encryption
+                    description: Password for restic repository
                     type: string
                   repository:
                     description: Restic repository URL (e.g., s3:s3.amazonaws.com/bucket,
@@ -483,7 +499,6 @@ spec:
                       type: string
                     type: array
                 required:
-                - password
                 - repository
                 type: object
               schedule:
@@ -512,11 +527,39 @@ spec:
             - schedule
             type: object
           status:
-            description: status defines the observed state of PVCBackup
+            description: status defines the observed state of BackupConfig
             properties:
+              backupJobs:
+                description: Backup job statistics
+                properties:
+                  failed:
+                    description: Number of failed jobs
+                    format: int32
+                    type: integer
+                  pending:
+                    description: Number of pending jobs
+                    format: int32
+                    type: integer
+                  running:
+                    description: Number of currently running jobs
+                    format: int32
+                    type: integer
+                  successful:
+                    description: Number of successful jobs
+                    format: int32
+                    type: integer
+                  total:
+                    description: Total number of jobs
+                    format: int32
+                    type: integer
+                type: object
               backupStatus:
                 description: Current backup status
                 type: string
+              backupTargets:
+                description: Number of backup targets configured
+                format: int32
+                type: integer
               conditions:
                 description: Conditions represent the latest available observations
                 items:
@@ -591,10 +634,38 @@ spec:
                 items:
                   type: string
                 type: array
+              matchingPVCs:
+                description: Number of matching PVCs managed by this PVCBackup
+                format: int32
+                type: integer
               nextBackup:
                 description: Next backup timestamp
                 format: date-time
                 type: string
+              restoreJobs:
+                description: Restore job statistics
+                properties:
+                  failed:
+                    description: Number of failed jobs
+                    format: int32
+                    type: integer
+                  pending:
+                    description: Number of pending jobs
+                    format: int32
+                    type: integer
+                  running:
+                    description: Number of currently running jobs
+                    format: int32
+                    type: integer
+                  successful:
+                    description: Number of successful jobs
+                    format: int32
+                    type: integer
+                  total:
+                    description: Total number of jobs
+                    format: int32
+                    type: integer
+                type: object
               restoreStatus:
                 description: Current restore status
                 type: string

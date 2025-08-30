@@ -4,19 +4,22 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: pvcbackupjobs.storage.cheap-man-ha-store.com
+  name: restorejobs.backup.autorestore-backup-operator.com
 spec:
-  group: storage.cheap-man-ha-store.com
+  group: backup.autorestore-backup-operator.com
   names:
-    kind: PVCBackupJob
-    listKind: PVCBackupJobList
-    plural: pvcbackupjobs
-    singular: pvcbackupjob
+    kind: RestoreJob
+    listKind: RestoreJobList
+    plural: restorejobs
+    singular: restorejob
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.phase
-      name: Status
+      name: Phase
+      type: string
+    - jsonPath: .status.restoreStatus
+      name: Restore Status
       type: string
     - jsonPath: .spec.pvcRef.name
       name: PVC
@@ -24,11 +27,8 @@ spec:
     - jsonPath: .spec.backupTarget.name
       name: Target
       type: string
-    - jsonPath: .status.resticID
-      name: Restic ID
-      type: string
-    - jsonPath: .status.size
-      name: Size
+    - jsonPath: .status.restoredBackupID
+      name: Backup ID
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -36,7 +36,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: PVCBackupJob is the Schema for the pvcbackupjobs API
+        description: RestoreJob is the Schema for the restorejobs API
         properties:
           apiVersion:
             description: |-
@@ -56,10 +56,42 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of PVCBackupJob
+            description: RestoreJobSpec defines the desired state of RestoreJob
             properties:
+              backupConfigRef:
+                description: Reference to the parent BackupConfig resource
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              backupID:
+                description: Manual backup ID to restore from (alternative to BackupJobRef)
+                type: string
+              backupJobRef:
+                description: Reference to the backup source (either BackupJob or manual
+                  backup ID)
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               backupTarget:
-                description: Backup target configuration
+                description: Backup target configuration for restore
                 properties:
                   name:
                     description: Name of the backup target
@@ -258,25 +290,12 @@ spec:
                 - priority
                 - restic
                 type: object
-              backupType:
-                description: Backup type (manual, scheduled)
-                type: string
-              pvcBackupRef:
-                description: Parent PVCBackup reference
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
+              overwriteExisting:
+                default: false
+                description: Whether to overwrite existing data in the PVC
+                type: boolean
               pvcRef:
-                description: PVC reference for this backup job
+                description: Reference to the PVC to restore data into
                 properties:
                   name:
                     default: ""
@@ -289,16 +308,19 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              restoreType:
+                description: Type of restore operation (manual, automated)
+                type: string
             required:
             - backupTarget
-            - pvcBackupRef
             - pvcRef
+            - restoreType
             type: object
           status:
-            description: status defines the observed state of PVCBackupJob
+            description: RestoreJobStatus defines the observed state of RestoreJob
             properties:
               completionTime:
-                description: Backup completion timestamp
+                description: Time when the restore completed
                 format: date-time
                 type: string
               conditions:
@@ -358,11 +380,15 @@ spec:
                   - type
                   type: object
                 type: array
+              dataRestored:
+                description: Amount of data restored (in bytes)
+                format: int64
+                type: integer
               error:
-                description: Error message if backup failed
+                description: Error message if restore failed
                 type: string
               jobRef:
-                description: Kubernetes Job reference
+                description: Reference to the Kubernetes Job performing the restore
                 properties:
                   name:
                     default: ""
@@ -376,25 +402,27 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               phase:
-                description: Current phase of the backup job
+                description: Current phase of the restore job (Pending, Running, Completed,
+                  Failed)
                 type: string
               repository:
-                description: Repository URL where backup is stored
+                description: Repository URL used for restore
                 type: string
-              resticID:
-                description: Restic backup ID
+              restoreStatus:
+                description: |-
+                  Type of restore operation status (Manual, Automated, NotFound)
+                  Manual: User explicitly requested restore
+                  Automated: Auto-restore triggered by system
+                  NotFound: No backup available for restore (normal for new PVCs)
                 type: string
-              size:
-                description: Backup size in bytes
-                format: int64
-                type: integer
+              restoredBackupID:
+                description: Backup ID that was restored
+                type: string
               startTime:
-                description: Backup start timestamp
+                description: Time when the restore started
                 format: date-time
                 type: string
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true
