@@ -65,6 +65,7 @@ rules:
 - apiGroups:
   - storage.cheap-man-ha-store.com
   resources:
+  - pvcbackupjobs
   - pvcbackups
   verbs:
   - create
@@ -77,12 +78,14 @@ rules:
 - apiGroups:
   - storage.cheap-man-ha-store.com
   resources:
+  - pvcbackupjobs/finalizers
   - pvcbackups/finalizers
   verbs:
   - update
 - apiGroups:
   - storage.cheap-man-ha-store.com
   resources:
+  - pvcbackupjobs/status
   - pvcbackups/status
   verbs:
   - get

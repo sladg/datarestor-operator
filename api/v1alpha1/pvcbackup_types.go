@@ -38,16 +38,33 @@ type BackupTarget struct {
 	// +required
 	Restic *ResticConfig `json:"restic"`
 
-	// NFS configuration for dynamic mounting (optional)
-	// +optional
-	NFS *NFSConfig `json:"nfs,omitempty"`
-
 	// Retention policy for this target
 	// +optional
 	Retention *RetentionPolicy `json:"retention,omitempty"`
+
+	// NFS configuration for dynamic mounting (optional)
+	// +optional
+	NFS *NFSConfig `json:"nfs,omitempty"`
 }
 
+// NFSConfig defines NFS mount configuration for dynamic mounting
+type NFSConfig struct {
+	// NFS server address
+	// +required
+	Server string `json:"server"`
 
+	// NFS export path
+	// +required
+	Path string `json:"path"`
+
+	// NFS mount options
+	// +optional
+	MountOptions []string `json:"mountOptions,omitempty"`
+
+	// Mount point in the container
+	// +optional
+	MountPath string `json:"mountPath,omitempty"`
+}
 
 // RetentionPolicy defines how many snapshots to keep
 type RetentionPolicy struct {
@@ -77,8 +94,9 @@ type PVCSelector struct {
 
 // BackupSchedule defines when to take snapshots
 type BackupSchedule struct {
-	// Cron expression for backup schedule
+	// Cron expression for backup schedule (e.g., "0 2 * * *" for daily at 2 AM)
 	// +required
+	// +kubebuilder:validation:Pattern=`^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1])) (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$`
 	Cron string `json:"cron"`
 
 	// Whether to stop pods during backup for data integrity
@@ -115,6 +133,10 @@ type PVCBackupSpec struct {
 	// Restic configuration for plain data backup
 	// +optional
 	Restic *ResticConfig `json:"restic,omitempty"`
+
+	// Manual backup trigger. If set to true, a backup will be triggered immediately and the field will be reset to false after completion.
+	// +optional
+	ManualBackup bool `json:"manualBackup,omitempty"`
 }
 
 // InitContainerConfig defines init container for restore waiting
@@ -138,9 +160,9 @@ type ResticConfig struct {
 	// +required
 	Repository string `json:"repository"`
 
-	// Restic password for repository encryption
-	// +required
-	Password string `json:"password"`
+	// Password for restic repository
+	// +optional
+	Password string `json:"password,omitempty"`
 
 	// Environment variables for authentication (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 	// +optional
@@ -157,25 +179,10 @@ type ResticConfig struct {
 	// Hostname for backup identification
 	// +optional
 	Host string `json:"host,omitempty"`
-}
 
-// NFSConfig defines NFS mount configuration for dynamic mounting
-type NFSConfig struct {
-	// NFS server address
-	// +required
-	Server string `json:"server"`
-
-	// NFS export path
-	// +required
-	Path string `json:"path"`
-
-	// NFS mount options
+	// Image for the restic job
 	// +optional
-	MountOptions []string `json:"mountOptions,omitempty"`
-
-	// Mount point in the container
-	// +optional
-	MountPath string `json:"mountPath,omitempty"`
+	Image string `json:"image,omitempty"`
 }
 
 // PVCBackupStatus defines the observed state of PVCBackup.
@@ -187,6 +194,10 @@ type PVCBackupStatus struct {
 	// Last backup timestamp
 	// +optional
 	LastBackup *metav1.Time `json:"lastBackup,omitempty"`
+
+	// Next backup timestamp
+	// +optional
+	NextBackup *metav1.Time `json:"nextBackup,omitempty"`
 
 	// Last restore timestamp
 	// +optional
@@ -208,16 +219,58 @@ type PVCBackupStatus struct {
 	// +optional
 	FailedBackups int32 `json:"failedBackups,omitempty"`
 
+	// Number of matching PVCs managed by this PVCBackup
+	// +optional
+	MatchingPVCs int32 `json:"matchingPVCs,omitempty"`
+
+	// Number of backup targets configured
+	// +optional
+	BackupTargets int32 `json:"backupTargets,omitempty"`
+
+	// Backup job statistics
+	// +optional
+	BackupJobs *JobStatistics `json:"backupJobs,omitempty"`
+
+	// Restore job statistics
+	// +optional
+	RestoreJobs *JobStatistics `json:"restoreJobs,omitempty"`
+
 	// Conditions represent the latest available observations
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
+// JobStatistics provides detailed statistics about backup/restore jobs
+type JobStatistics struct {
+	// Number of successful jobs
+	// +optional
+	Successful int32 `json:"successful,omitempty"`
+
+	// Number of currently running jobs
+	// +optional
+	Running int32 `json:"running,omitempty"`
+
+	// Number of failed jobs
+	// +optional
+	Failed int32 `json:"failed,omitempty"`
+
+	// Number of pending jobs
+	// +optional
+	Pending int32 `json:"pending,omitempty"`
+
+	// Total number of jobs
+	// +optional
+	Total int32 `json:"total,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.backupStatus"
-// +kubebuilder:printcolumn:name="Last Backup",type="date",JSONPath=".status.lastBackup"
-// +kubebuilder:printcolumn:name="PVCs",type="integer",JSONPath=".status.managedPVCs"
+// +kubebuilder:printcolumn:name="PVCs",type="integer",JSONPath=".status.matchingPVCs"
+// +kubebuilder:printcolumn:name="Targets",type="integer",JSONPath=".status.backupTargets"
+// +kubebuilder:printcolumn:name="Backup Success",type="integer",JSONPath=".status.backupJobs.successful"
+// +kubebuilder:printcolumn:name="Backup Running",type="integer",JSONPath=".status.backupJobs.running"
+// +kubebuilder:printcolumn:name="Backup Failed",type="integer",JSONPath=".status.backupJobs.failed"
+// +kubebuilder:printcolumn:name="Restore Success",type="integer",JSONPath=".status.restoreJobs.successful"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // PVCBackup is the Schema for the pvcbackups API

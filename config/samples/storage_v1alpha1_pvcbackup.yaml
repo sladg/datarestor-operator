@@ -11,7 +11,9 @@ spec:
       priority: 1
       restic:
         repository: "s3:s3.amazonaws.com/my-backup-bucket"
-        password: "your-encryption-password"
+        passwordSecretRef:
+          name: restic-secret
+          key: password
         env:
           - name: AWS_ACCESS_KEY_ID
             value: "your-access-key"
@@ -26,24 +28,37 @@ spec:
         flags:
           - "--verbose"
           - "--compression=auto"
+        image: "restic/restic:latest"
+      retention:
+        maxSnapshots: 30
+        maxAge: "2160h"
 
-    # NFS storage via Restic
+    # NFS storage via Restic (using CSI driver)
     - name: nfs-backup
       priority: 2
       restic:
         repository: "local:/mnt/backup/restic-repo"
-        password: "your-encryption-password"
+        passwordSecretRef:
+          name: restic-secret
+          key: password
         tags:
           - "local-backup"
           - "redundant"
         host: "k8s-cluster-1"
         flags:
-          - "--no-lock"
+          - "--no-lock" # Important for NFS
+        image: "restic/restic:latest"
       nfs:
         server: "nfs.example.com"
-        path: "/backup"
-        mountOptions: ["nfsvers=4", "soft"]
+        path: "/exports/backup"
         mountPath: "/mnt/backup"
+        mountOptions:
+          - "nfsvers=4.1"
+          - "hard"
+          - "noatime"
+      retention:
+        maxSnapshots: 15
+        maxAge: "1080h" # 45 days
 
   # PVC selection criteria
   pvcSelector:
@@ -68,12 +83,17 @@ spec:
   autoRestore: true
 
   # Retention policy (applied to all targets)
-  retention:
-    maxSnapshots: 30
-    maxAge: "90d"
 
   # Init container for restore waiting
   initContainer:
     image: "busybox:1.35"
     command: ["/bin/sh"]
     args: ["-c", "echo 'Waiting for restore to complete...' && sleep 10"]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: restic-secret
+  namespace: default
+stringData:
+  password: your-encryption-password

@@ -5,13 +5,13 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: cheap-man-ha-store
     app.kubernetes.io/managed-by: kustomize
-  name: system
+  name: cheap-man-ha-store-system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: controller-manager
-  namespace: system
+  namespace: cheap-man-ha-store-system
   labels:
     control-plane: controller-manager
     app.kubernetes.io/name: cheap-man-ha-store
@@ -58,13 +58,13 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - command:
-            - /manager
+        - name: manager
+          image: kind.local/cheap-man-ha-store:latest
+          command: ["/manager"]
           args:
             - --leader-elect
             - --health-probe-bind-address=:8081
-          image: controller:latest
-          name: manager
+          imagePullPolicy: Never
           ports: []
           securityContext:
             readOnlyRootFilesystem: true
@@ -93,7 +93,11 @@ spec:
             requests:
               cpu: 10m
               memory: 64Mi
-          volumeMounts: []
-      volumes: []
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

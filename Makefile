@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= kind.local/cheap-man-ha-store:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -164,6 +164,13 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+
+.PHONY: deploy-restart
+deploy-restart: deploy ## Deploy controller and restart the operator pod.
+	kubectl rollout restart deployment/cheap-man-ha-store-controller-manager -n cheap-man-ha-store-system
+	@echo "Operator deployment restarted, waiting for rollout to complete..."
+	kubectl rollout status deployment/cheap-man-ha-store-controller-manager -n cheap-man-ha-store-system
+	@echo "Operator restarted successfully!"
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
