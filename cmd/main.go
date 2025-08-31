@@ -203,11 +203,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.BackupConfigReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	// Setup BackupConfig controller
+	backupConfigReconciler, err := controller.NewBackupConfigReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable to create BackupConfigReconciler")
+		os.Exit(1)
+	}
+	if err := backupConfigReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BackupConfig")
+		os.Exit(1)
+	}
+
+	// Setup ResticRestore controller
+	resticRestoreReconciler := controller.NewResticRestoreReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
+	if err := resticRestoreReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ResticRestore")
+		os.Exit(1)
+	}
+
+	// Setup ResticRepository controller
+	resticRepositoryReconciler := controller.NewResticRepositoryReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
+	if err := resticRepositoryReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ResticRepository")
+		os.Exit(1)
+	}
+
+	// Setup ResticBackup controller
+	resticBackupReconciler := controller.NewResticBackupReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
+	if err := resticBackupReconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ResticBackup")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

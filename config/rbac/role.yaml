@@ -7,13 +7,7 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - events
-    verbs:
-      - create
-      - patch
-  - apiGroups:
-      - ""
-    resources:
+      - configmaps
       - persistentvolumeclaims
     verbs:
       - create
@@ -23,6 +17,13 @@ rules:
       - patch
       - update
       - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
   - apiGroups:
       - ""
     resources:
@@ -43,18 +44,24 @@ rules:
       - update
       - watch
   - apiGroups:
-      - ""
+      - apps
     resources:
-      - pods/log
+      - daemonsets
+      - deployments
+      - statefulsets
     verbs:
       - get
       - list
+      - patch
+      - update
+      - watch
   - apiGroups:
       - backup.autorestore-backup-operator.com
     resources:
       - backupconfigs
-      - backupjobs
-      - restorejobs
+      - resticbackups
+      - resticrepositories
+      - resticrestores
     verbs:
       - create
       - delete
@@ -67,16 +74,18 @@ rules:
       - backup.autorestore-backup-operator.com
     resources:
       - backupconfigs/finalizers
-      - backupjobs/finalizers
-      - restorejobs/finalizers
+      - resticbackups/finalizers
+      - resticrepositories/finalizers
+      - resticrestores/finalizers
     verbs:
       - update
   - apiGroups:
       - backup.autorestore-backup-operator.com
     resources:
       - backupconfigs/status
-      - backupjobs/status
-      - restorejobs/status
+      - resticbackups/status
+      - resticrepositories/status
+      - resticrestores/status
     verbs:
       - get
       - patch

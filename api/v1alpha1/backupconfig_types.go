@@ -41,40 +41,57 @@ type BackupTarget struct {
 	// Retention policy for this target
 	// +optional
 	Retention *RetentionPolicy `json:"retention,omitempty"`
-
-	// NFS configuration for dynamic mounting (optional)
-	// +optional
-	NFS *NFSConfig `json:"nfs,omitempty"`
 }
 
-// NFSConfig defines NFS mount configuration for dynamic mounting
-type NFSConfig struct {
-	// NFS server address
-	// +required
-	Server string `json:"server"`
-
-	// NFS export path
-	// +required
-	Path string `json:"path"`
-
-	// NFS mount options
-	// +optional
-	MountOptions []string `json:"mountOptions,omitempty"`
-
-	// Mount point in the container
-	// +optional
-	MountPath string `json:"mountPath,omitempty"`
-}
-
-// RetentionPolicy defines how many snapshots to keep
+// RetentionPolicy defines retention policy for snapshots using restic forget options
 type RetentionPolicy struct {
-	// Maximum number of snapshots to keep
-	// +required
-	MaxSnapshots int32 `json:"maxSnapshots"`
-
-	// Maximum age of snapshots to keep
+	// Keep the last n snapshots (restic --keep-last)
 	// +optional
-	MaxAge *metav1.Duration `json:"maxAge,omitempty"`
+	KeepLast *int32 `json:"keepLast,omitempty"`
+
+	// Keep the most recent snapshot for each of the last n hours (restic --keep-hourly)
+	// +optional
+	KeepHourly *int32 `json:"keepHourly,omitempty"`
+
+	// Keep the most recent snapshot for each of the last n days (restic --keep-daily)
+	// +optional
+	KeepDaily *int32 `json:"keepDaily,omitempty"`
+
+	// Keep the most recent snapshot for each of the last n weeks (restic --keep-weekly)
+	// +optional
+	KeepWeekly *int32 `json:"keepWeekly,omitempty"`
+
+	// Keep the most recent snapshot for each of the last n months (restic --keep-monthly)
+	// +optional
+	KeepMonthly *int32 `json:"keepMonthly,omitempty"`
+
+	// Keep the most recent snapshot for each of the last n years (restic --keep-yearly)
+	// +optional
+	KeepYearly *int32 `json:"keepYearly,omitempty"`
+
+	// Keep all snapshots within this duration (restic --keep-within, e.g. "2y5m7d3h")
+	// +optional
+	KeepWithin *metav1.Duration `json:"keepWithin,omitempty"`
+
+	// Keep snapshots with these tags (restic --keep-tag)
+	// +optional
+	KeepTags []string `json:"keepTags,omitempty"`
+
+	// Whether to run prune automatically after forget (restic --prune)
+	// +optional
+	// +kubebuilder:default=true
+	Prune bool `json:"prune,omitempty"`
+
+	// Cron schedule for retention checks (e.g., "0 3 * * *" for daily at 3 AM)
+	// If not specified, defaults to "0 3 * * *"
+	// +optional
+	// +kubebuilder:default="0 3 * * *"
+	// +kubebuilder:validation:Pattern=`^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1])) (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$`
+	Schedule string `json:"schedule,omitempty"`
+
+	// Deprecated: Use KeepLast instead
+	// +optional
+	MaxSnapshots int32 `json:"maxSnapshots,omitempty"`
 }
 
 // PVCSelector defines how to select PVCs for backup
@@ -126,37 +143,14 @@ type BackupConfigSpec struct {
 	// +optional
 	AutoRestore bool `json:"autoRestore,omitempty"`
 
-	// Init container configuration for restore waiting
-	// +optional
-	InitContainer *InitContainerConfig `json:"initContainer,omitempty"`
-
-	// Restic configuration for plain data backup
-	// +optional
-	Restic *ResticConfig `json:"restic,omitempty"`
-
 	// Manual backup trigger. If set to true, a backup will be triggered immediately and the field will be reset to false after completion.
 	// +optional
 	ManualBackup bool `json:"manualBackup,omitempty"`
 }
 
-// InitContainerConfig defines init container for restore waiting
-type InitContainerConfig struct {
-	// Image for the init container
-	// +required
-	Image string `json:"image"`
-
-	// Command for the init container
-	// +optional
-	Command []string `json:"command,omitempty"`
-
-	// Args for the init container
-	// +optional
-	Args []string `json:"args,omitempty"`
-}
-
 // ResticConfig defines restic backup configuration
 type ResticConfig struct {
-	// Restic repository URL (e.g., s3:s3.amazonaws.com/bucket, nfs:/mnt/backup, sftp:user@host:/path)
+	// Restic repository URL (e.g., s3:s3.amazonaws.com/bucket)
 	// +required
 	Repository string `json:"repository"`
 
@@ -199,34 +193,6 @@ type BackupConfigStatus struct {
 	// +optional
 	NextBackup *metav1.Time `json:"nextBackup,omitempty"`
 
-	// Last restore timestamp
-	// +optional
-	LastRestore *metav1.Time `json:"lastRestore,omitempty"`
-
-	// Current backup status
-	// +optional
-	BackupStatus string `json:"backupStatus,omitempty"`
-
-	// Current restore status
-	// +optional
-	RestoreStatus string `json:"restoreStatus,omitempty"`
-
-	// Number of successful backups
-	// +optional
-	SuccessfulBackups int32 `json:"successfulBackups,omitempty"`
-
-	// Number of failed backups
-	// +optional
-	FailedBackups int32 `json:"failedBackups,omitempty"`
-
-	// Number of matching PVCs managed by this PVCBackup
-	// +optional
-	MatchingPVCs int32 `json:"matchingPVCs,omitempty"`
-
-	// Number of backup targets configured
-	// +optional
-	BackupTargets int32 `json:"backupTargets,omitempty"`
-
 	// Backup job statistics
 	// +optional
 	BackupJobs *JobStatistics `json:"backupJobs,omitempty"`
@@ -234,6 +200,10 @@ type BackupConfigStatus struct {
 	// Restore job statistics
 	// +optional
 	RestoreJobs *JobStatistics `json:"restoreJobs,omitempty"`
+
+	// Last time retention policy was applied
+	// +optional
+	LastRetentionCheck *metav1.Time `json:"lastRetentionCheck,omitempty"`
 
 	// Conditions represent the latest available observations
 	// +optional

@@ -2,9 +2,10 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
+	"github.com/sladg/autorestore-backup-operator/internal/constants"
+	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -23,7 +24,7 @@ func (r *BackupConfigReconciler) cleanupBackupConfigResources(ctx context.Contex
 
 // handleBackupConfigDeletion handles cleanup when BackupConfig is being deleted
 func (r *BackupConfigReconciler) handleBackupConfigDeletion(ctx context.Context, backupConfig *backupv1alpha1.BackupConfig) (ctrl.Result, error) {
-	logger := LoggerFrom(ctx, "deletion").
+	logger := utils.LoggerFrom(ctx, "deletion").
 		WithValues("name", backupConfig.Name)
 
 	logger.Starting("deletion")
@@ -36,10 +37,10 @@ func (r *BackupConfigReconciler) handleBackupConfigDeletion(ctx context.Context,
 
 	// Remove finalizer
 	logger.Debug("Removing finalizer")
-	controllerutil.RemoveFinalizer(backupConfig, BackupConfigFinalizer)
+	controllerutil.RemoveFinalizer(backupConfig, constants.BackupConfigFinalizer)
 	if err := r.Update(ctx, backupConfig); err != nil {
 		logger.Failed("remove finalizer", err)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
 	logger.Completed("deletion")

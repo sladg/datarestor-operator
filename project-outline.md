@@ -4,7 +4,7 @@ it would do:
 
 - snapshot volumes from time to time and save to S3,
 - on newly created stuff, it would check if volume is populated (PVC should be new and unique) and restore from snapshot,
-- initContainer so that services wait for restoration?
+- finalizers so that services wait for restoration?
 - it should be configurable by labels on PV/PVC?
 
 Databases? Sqlite? Might be problematic with data integrity.

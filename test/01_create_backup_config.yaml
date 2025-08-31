@@ -1,0 +1,87 @@
+# BackupConfig with multiple targets for testing
+apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+kind: BackupConfig
+metadata:
+  name: test-local-backup
+  namespace: backup-test
+spec:
+  pvcSelector:
+    labelSelector:
+      matchLabels:
+        backup: "enabled"
+    namespaces: [backup-test]
+
+  backupTargets:
+    - name: local-backup
+      priority: 1
+      restic:
+        repository: "local:/mnt/repo/local-restic-repo"
+        env:
+          - name: RESTIC_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: restic-secret
+                key: password
+        tags: [test, local, primary]
+        host: "test-cluster"
+        flags: ["--verbose"]
+      retention:
+        maxSnapshots: 10
+        maxAge: "168h" # 7 days
+
+  schedule:
+    cron: "0 */5 * * *" # Every 5 hours
+    waitForHealthy: true
+    stopPods: false
+
+  autoRestore: true
+
+---
+# BackupConfig with S3 (MinIO) target
+apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+kind: BackupConfig
+metadata:
+  name: test-s3-backup
+  namespace: backup-test
+spec:
+  pvcSelector:
+    labelSelector:
+      matchLabels:
+        backup: "enabled"
+        environment: "test"
+    namespaces: [backup-test]
+
+  backupTargets:
+    - name: s3-backup
+      priority: 1
+      restic:
+        repository: "s3:http://minio.backup-test.svc.cluster.local:9000/restic-backups"
+        env:
+          - name: RESTIC_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: restic-secret
+                key: password
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: access-key-id
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: secret-access-key
+        tags: [test, s3, minio]
+        host: "test-cluster"
+        flags: ["--verbose"]
+      retention:
+        maxSnapshots: 7
+        maxAge: "96h" # 4 days
+
+  schedule:
+    cron: "0 */5 * * *" # Every 5 hours
+    waitForHealthy: true
+    stopPods: false
+
+  autoRestore: false # Manual restore only for this one

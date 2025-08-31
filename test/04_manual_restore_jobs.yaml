@@ -1,0 +1,71 @@
+# Manual RestoreJob examples for testing
+apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+kind: RestoreJob
+metadata:
+  name: restore-web-app-manual
+  namespace: backup-test
+spec:
+  pvcRef:
+    name: web-app-data
+  restoreType: manual
+  backupTarget:
+    name: local-backup
+    restic:
+      repository: "local:/tmp/local-restic-repo"
+      env:
+        - name: RESTIC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: restic-secret
+              key: password
+      host: "test-cluster"
+  overwriteExisting: false
+---
+# RestoreJob with specific backup ID (update this with actual backup ID)
+apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+kind: RestoreJob
+metadata:
+  name: restore-postgres-specific
+  namespace: backup-test
+spec:
+  pvcRef:
+    name: postgres-data
+  restoreType: manual
+  # backupID: "abc123def456"  # Uncomment and set actual backup ID when available
+  backupTarget:
+    name: nfs-backup
+    restic:
+      repository: "local:/mnt/backup/_OPERATOR_TEST"
+      env:
+        - name: RESTIC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: restic-secret
+              key: password
+      host: "test-cluster"
+  overwriteExisting: true # Allow overwriting existing data
+---
+# RestoreJob referencing a BackupJob
+apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+kind: RestoreJob
+metadata:
+  name: restore-from-backupjob
+  namespace: backup-test
+spec:
+  pvcRef:
+    name: web-app-data
+  restoreType: manual
+  # backupJobRef:
+  #   name: "backup-job-name"  # Reference to an existing BackupJob
+  backupTarget:
+    name: local-backup
+    restic:
+      repository: "local:/tmp/local-restic-repo"
+      env:
+        - name: RESTIC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: restic-secret
+              key: password
+      host: "test-cluster"
+  overwriteExisting: false

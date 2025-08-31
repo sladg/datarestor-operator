@@ -1,0 +1,109 @@
+# General setup - Secrets and base resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup-test
+  labels:
+    name: backup-test
+---
+# Test secrets for Restic authentication
+apiVersion: v1
+kind: Secret
+metadata:
+  name: restic-secret
+  namespace: backup-test
+stringData:
+  password: test-password-123
+---
+# MinIO credentials for S3 testing
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: backup-test
+stringData:
+  access-key-id: minioadmin
+  secret-access-key: minioadmin
+
+---
+# MinIO S3-compatible storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-storage
+  namespace: backup-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: backup-test
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          command:
+            - /bin/bash
+            - -c
+          args:
+            - minio server /data --console-address :9001
+          ports:
+            - name: api
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              value: minioadmin
+            - name: MINIO_ROOT_PASSWORD
+              value: minioadmin
+          volumeMounts:
+            - name: minio-storage
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: minio-storage
+          persistentVolumeClaim:
+            claimName: minio-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: backup-test
+  labels:
+    app: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  type: ClusterIP

@@ -1,0 +1,116 @@
+# Monitoring and debugging tools
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-browser-storage
+  namespace: backup-test
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: standard
+---
+# Filebrowser for viewing backup repositories
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-filebrowser
+  namespace: backup-test
+  labels:
+    app: backup-filebrowser
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backup-filebrowser
+  template:
+    metadata:
+      labels:
+        app: backup-filebrowser
+    spec:
+      containers:
+        - name: filebrowser
+          image: filebrowser/filebrowser:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FB_BASEURL
+              value: "/"
+            - name: FB_PORT
+              value: "8080"
+            - name: FB_AUTH_METHOD
+              value: "noauth"
+            - name: FB_DATABASE
+              value: "/srv/database.db"
+            - name: FB_LOG
+              value: "stdout"
+            - name: FB_LOG_LEVEL
+              value: "INFO"
+          volumeMounts:
+            - name: backup-storage
+              mountPath: /srv
+            - name: local-backups
+              mountPath: /srv/local-backups
+              readOnly: true
+      volumes:
+        - name: backup-storage
+          persistentVolumeClaim:
+            claimName: backup-browser-storage
+        - name: local-backups
+          hostPath:
+            path: /tmp/local-restic-repo
+            type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backup-filebrowser
+  namespace: backup-test
+  labels:
+    app: backup-filebrowser
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+  selector:
+    app: backup-filebrowser
+---
+# Debug pod for manual inspection
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-pod
+  namespace: backup-test
+  labels:
+    app: debug
+spec:
+  containers:
+    - name: debug
+      image: busybox:1.35
+      command: ["/bin/sh"]
+      args: ["-c", "while true; do sleep 3600; done"]
+      volumeMounts:
+        - name: local-backups
+          mountPath: /backups
+        - name: web-data
+          mountPath: /web-data
+          readOnly: true
+        - name: postgres-data
+          mountPath: /postgres-data
+          readOnly: true
+  volumes:
+    - name: local-backups
+      hostPath:
+        path: /tmp/local-restic-repo
+        type: DirectoryOrCreate
+    - name: web-data
+      persistentVolumeClaim:
+        claimName: web-app-data
+    - name: postgres-data
+      persistentVolumeClaim:
+        claimName: postgres-data
+  restartPolicy: Always

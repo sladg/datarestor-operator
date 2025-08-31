@@ -1,0 +1,100 @@
+# Test applications that create data to backup
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-app-data
+  namespace: backup-test
+  labels:
+    backup: "enabled"
+    app: web-app
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  namespace: backup-test
+  labels:
+    app: web-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: web-data
+              mountPath: /usr/share/nginx/html
+              subPath: html
+            - name: web-data
+              mountPath: /etc/nginx/conf.d
+              subPath: conf
+        - name: data-writer
+          image: busybox:1.35
+          command: ["/bin/sh"]
+          args:
+            - -c
+            - |
+              echo "Starting web app data writer..."
+              # Create initial content
+              echo "<h1>Backup Test Web App</h1>" > /web-data/index.html
+              echo "<p>Started at: $(date)</p>" >> /web-data/index.html
+
+              # Create config
+              cat > /config/default.conf << 'EOF'
+              server {
+                  listen 80;
+                  location / {
+                      root /usr/share/nginx/html;
+                      index index.html;
+                  }
+              }
+              EOF
+
+              # Keep updating content
+              counter=1
+              while true; do
+                echo "<p>Update #$counter at $(date)</p>" >> /web-data/updates.html
+                echo "$(date): Update #$counter" >> /web-data/activity.log
+                counter=$((counter + 1))
+                sleep 60
+              done
+          volumeMounts:
+            - name: web-data
+              mountPath: /web-data
+              subPath: html
+            - name: web-data
+              mountPath: /config
+              subPath: conf
+      volumes:
+        - name: web-data
+          persistentVolumeClaim:
+            claimName: web-app-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app
+  namespace: backup-test
+spec:
+  selector:
+    app: web-app
+  ports:
+    - port: 80
+      targetPort: 80
+  type: NodePort

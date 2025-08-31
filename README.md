@@ -8,14 +8,15 @@ Manual backup:
 kubectl annotate backupconfig my-backup backup.autorestore-backup-operator.com/manual-restore=<snapshot-id> --overwrite
 ```
 
-Manual restore:
+Restores:
 
 ```sh
 kubectl annotate backupconfig my-backup backup.autorestore-backup-operator.com/manual-restore=latest --overwrite
 ```
 
 ```sh
-kubectl annotate backupconfig my-backup backup.autorestore-backup-operator.com/manual-restore=<snapshot-id> --overwrite
+kubectl annotate pvc postgres-data \
+  backup.autorestore-backup-operator.com/manual-restore-trigger=now
 ```
 
 We are allowing for multiple targets. Automated restore prefers latest cluster-known backup. If not found, it will query restic directly and use latest backup. If not found, it will not restore anything - case of newly created PVCs.
@@ -29,6 +30,8 @@ We are allowing for multiple targets. Automated restore prefers latest cluster-k
 - [ ] Allow for password to be passed in as a secret.
 - [ ] Make backup schedule per-target.
 - [ ] Allow for passing NFS mount options.
+- [ ] Allow for passing an ID from restic to for manual restore.
+- [ ] Allow for passing an ID into restic for manual backups.
 
 ---
 
