@@ -58,11 +58,6 @@ spec:
           spec:
             description: ResticRepositorySpec defines the desired state of ResticRepository
             properties:
-              autoInit:
-                default: true
-                description: Whether to automatically initialize the repository if
-                  it doesn't exist
-                type: boolean
               env:
                 description: Environment variables for authentication (e.g., AWS_ACCESS_KEY_ID,
                   AWS_SECRET_ACCESS_KEY)
@@ -300,9 +295,6 @@ spec:
               error:
                 description: Error message if repository is in failed state
                 type: string
-              initialized:
-                description: Whether the repository is initialized and ready for use
-                type: boolean
               initializedTime:
                 description: Time when the repository was last initialized
                 format: date-time

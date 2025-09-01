@@ -107,6 +107,10 @@ type ResticBackupStatus struct {
 	// +optional
 	Error string `json:"error,omitempty"`
 
+	// Duration of the backup job as a string.
+	// +optional
+	Duration string `json:"duration,omitempty"`
+
 	// Conditions represent the latest available observations
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
@@ -120,6 +124,7 @@ type ResticBackupStatus struct {
 // +kubebuilder:printcolumn:name="Snapshot ID",type="string",JSONPath=".spec.snapshotID"
 // +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.size"
 // +kubebuilder:printcolumn:name="Repository",type="string",JSONPath=".spec.repositoryRef.name"
+// +kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ResticBackup is the Schema for the resticbackups API

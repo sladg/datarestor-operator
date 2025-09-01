@@ -41,6 +41,10 @@ type BackupTarget struct {
 	// Retention policy for this target
 	// +optional
 	Retention *RetentionPolicy `json:"retention,omitempty"`
+
+	// Backup schedule for this target
+	// +required
+	Schedule BackupSchedule `json:"schedule"`
 }
 
 // RetentionPolicy defines retention policy for snapshots using restic forget options
@@ -94,19 +98,27 @@ type RetentionPolicy struct {
 	MaxSnapshots int32 `json:"maxSnapshots,omitempty"`
 }
 
-// PVCSelector defines how to select PVCs for backup
-type PVCSelector struct {
-	// Label selector for PVCs
+// Selector defines how to select PVCs for backup.
+type Selector struct {
+	// Label selector for PVCs.
 	// +optional
 	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
 
-	// Namespace selector
+	// Annotation selector for PVCs. A PVC is selected if it has all the annotations in this map.
+	// +optional
+	AnnotationSelector map[string]string `json:"annotationSelector,omitempty"`
+
+	// A list of namespaces to select PVCs from. If empty, it will search in all namespaces.
 	// +optional
 	Namespaces []string `json:"namespaces,omitempty"`
 
-	// PVC names to include
+	// A list of PVC names to select.
 	// +optional
 	Names []string `json:"names,omitempty"`
+
+	// StopPods specifies whether to scale down workloads using the PVCs matched by this selector.
+	// +optional
+	StopPods bool `json:"stopPods,omitempty"`
 }
 
 // BackupSchedule defines when to take snapshots
@@ -127,25 +139,17 @@ type BackupSchedule struct {
 
 // BackupConfigSpec defines the desired state of BackupConfig
 type BackupConfigSpec struct {
-	// PVC selector configuration
+	// A list of selectors for PVCs to be backed up. A PVC is selected if it matches any of the selectors in this list.
 	// +required
-	PVCSelector PVCSelector `json:"pvcSelector"`
+	Selectors []Selector `json:"selectors"`
 
 	// Backup targets with priorities
 	// +required
 	BackupTargets []BackupTarget `json:"backupTargets"`
 
-	// Backup schedule configuration
-	// +required
-	Schedule BackupSchedule `json:"schedule"`
-
 	// Whether to enable automatic restore for new PVCs
 	// +optional
 	AutoRestore bool `json:"autoRestore,omitempty"`
-
-	// Manual backup trigger. If set to true, a backup will be triggered immediately and the field will be reset to false after completion.
-	// +optional
-	ManualBackup bool `json:"manualBackup,omitempty"`
 }
 
 // ResticConfig defines restic backup configuration
@@ -154,17 +158,20 @@ type ResticConfig struct {
 	// +required
 	Repository string `json:"repository"`
 
-	// Password for restic repository
-	// +optional
-	Password string `json:"password,omitempty"`
+	// Secret containing the password for the restic repository.
+	// The secret must contain a key named 'password'.
+	// +required
+	PasswordSecretRef corev1.SecretKeySelector `json:"passwordSecretRef"`
 
 	// Environment variables for authentication (e.g., AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
-	// Additional restic flags
+	// Additional flags to pass directly to the restic backup command.
+	// Use with caution, as invalid flags can break backup operations.
+	// Flags that conflict with the operator's core functionality (e.g., --repo, --json) will be ignored.
 	// +optional
-	Flags []string `json:"flags,omitempty"`
+	AdditionalFlags []string `json:"additionalFlags,omitempty"`
 
 	// Backup tags for organization
 	// +optional
@@ -179,19 +186,28 @@ type ResticConfig struct {
 	Image string `json:"image,omitempty"`
 }
 
+// BackupTargetStatus holds the status for a single backup target.
+type BackupTargetStatus struct {
+	// Name of the backup target, matches one of the names in spec.backupTargets.
+	// +required
+	Name string `json:"name"`
+	// Last backup timestamp for this target.
+	// +optional
+	LastBackup *metav1.Time `json:"lastBackup,omitempty"`
+	// Next backup timestamp for this target.
+	// +optional
+	NextBackup *metav1.Time `json:"nextBackup,omitempty"`
+}
+
 // BackupConfigStatus defines the observed state of BackupConfig.
 type BackupConfigStatus struct {
 	// List of PVCs being managed
 	// +optional
 	ManagedPVCs []string `json:"managedPVCs,omitempty"`
 
-	// Last backup timestamp
+	// Status for each backup target.
 	// +optional
-	LastBackup *metav1.Time `json:"lastBackup,omitempty"`
-
-	// Next backup timestamp
-	// +optional
-	NextBackup *metav1.Time `json:"nextBackup,omitempty"`
+	Targets []BackupTargetStatus `json:"targets,omitempty"`
 
 	// Backup job statistics
 	// +optional

@@ -44,11 +44,6 @@ type ResticRepositorySpec struct {
 	// +kubebuilder:default="restic/restic:latest"
 	Image string `json:"image,omitempty"`
 
-	// Whether to automatically initialize the repository if it doesn't exist
-	// +optional
-	// +kubebuilder:default=true
-	AutoInit bool `json:"autoInit,omitempty"`
-
 	// Repository maintenance schedule (for check, prune operations)
 	// +optional
 	MaintenanceSchedule *RepositoryMaintenanceSchedule `json:"maintenanceSchedule,omitempty"`
@@ -83,10 +78,6 @@ type ResticRepositoryStatus struct {
 	// +optional
 	// +kubebuilder:validation:Enum=Unknown;Initializing;Ready;Failed
 	Phase string `json:"phase,omitempty"`
-
-	// Whether the repository is initialized and ready for use
-	// +optional
-	Initialized bool `json:"initialized,omitempty"`
 
 	// Time when the repository was last initialized
 	// +optional

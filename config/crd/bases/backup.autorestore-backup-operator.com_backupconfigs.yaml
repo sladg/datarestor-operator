@@ -80,6 +80,14 @@ spec:
                     restic:
                       description: Restic configuration for backup targets
                       properties:
+                        additionalFlags:
+                          description: |-
+                            Additional flags to pass directly to the restic backup command.
+                            Use with caution, as invalid flags can break backup operations.
+                            Flags that conflict with the operator's core functionality (e.g., --repo, --json) will be ignored.
+                          items:
+                            type: string
+                          type: array
                         env:
                           description: Environment variables for authentication (e.g.,
                             AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
@@ -201,20 +209,38 @@ spec:
                             - name
                             type: object
                           type: array
-                        flags:
-                          description: Additional restic flags
-                          items:
-                            type: string
-                          type: array
                         host:
                           description: Hostname for backup identification
                           type: string
                         image:
                           description: Image for the restic job
                           type: string
-                        password:
-                          description: Password for restic repository
-                          type: string
+                        passwordSecretRef:
+                          description: |-
+                            Secret containing the password for the restic repository.
+                            The secret must contain a key named 'password'.
+                          properties:
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
                         repository:
                           description: Restic repository URL (e.g., s3:s3.amazonaws.com/bucket)
                           type: string
@@ -224,6 +250,7 @@ spec:
                             type: string
                           type: array
                       required:
+                      - passwordSecretRef
                       - repository
                       type: object
                     retention:
@@ -287,101 +314,112 @@ spec:
                             (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$
                           type: string
                       type: object
+                    schedule:
+                      description: Backup schedule for this target
+                      properties:
+                        cron:
+                          description: Cron expression for backup schedule (e.g.,
+                            "0 2 * * *" for daily at 2 AM)
+                          pattern: ^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
+                            (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
+                            (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1]))
+                            (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$
+                          type: string
+                        stopPods:
+                          description: Whether to stop pods during backup for data
+                            integrity
+                          type: boolean
+                        waitForHealthy:
+                          description: Wait for pod health before backup
+                          type: boolean
+                      required:
+                      - cron
+                      type: object
                   required:
                   - name
                   - priority
                   - restic
+                  - schedule
                   type: object
                 type: array
-              manualBackup:
-                description: Manual backup trigger. If set to true, a backup will
-                  be triggered immediately and the field will be reset to false after
-                  completion.
-                type: boolean
-              pvcSelector:
-                description: PVC selector configuration
-                properties:
-                  labelSelector:
-                    description: Label selector for PVCs
-                    properties:
-                      matchExpressions:
-                        description: matchExpressions is a list of label selector
-                          requirements. The requirements are ANDed.
-                        items:
-                          description: |-
-                            A label selector requirement is a selector that contains values, a key, and an operator that
-                            relates the key and values.
-                          properties:
-                            key:
-                              description: key is the label key that the selector
-                                applies to.
-                              type: string
-                            operator:
-                              description: |-
-                                operator represents a key's relationship to a set of values.
-                                Valid operators are In, NotIn, Exists and DoesNotExist.
-                              type: string
-                            values:
-                              description: |-
-                                values is an array of string values. If the operator is In or NotIn,
-                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                                the values array must be empty. This array is replaced during a strategic
-                                merge patch.
-                              items:
+              selectors:
+                description: A list of selectors for PVCs to be backed up. A PVC is
+                  selected if it matches any of the selectors in this list.
+                items:
+                  description: Selector defines how to select PVCs for backup.
+                  properties:
+                    annotationSelector:
+                      additionalProperties:
+                        type: string
+                      description: Annotation selector for PVCs. A PVC is selected
+                        if it has all the annotations in this map.
+                      type: object
+                    labelSelector:
+                      description: Label selector for PVCs.
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector
+                            requirements. The requirements are ANDed.
+                          items:
+                            description: |-
+                              A label selector requirement is a selector that contains values, a key, and an operator that
+                              relates the key and values.
+                            properties:
+                              key:
+                                description: key is the label key that the selector
+                                  applies to.
                                 type: string
-                              type: array
-                              x-kubernetes-list-type: atomic
-                          required:
-                          - key
-                          - operator
+                              operator:
+                                description: |-
+                                  operator represents a key's relationship to a set of values.
+                                  Valid operators are In, NotIn, Exists and DoesNotExist.
+                                type: string
+                              values:
+                                description: |-
+                                  values is an array of string values. If the operator is In or NotIn,
+                                  the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                  the values array must be empty. This array is replaced during a strategic
+                                  merge patch.
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                            required:
+                            - key
+                            - operator
+                            type: object
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        matchLabels:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                            map is equivalent to an element of matchExpressions, whose key field is "key", the
+                            operator is "In", and the values array contains only "value". The requirements are ANDed.
                           type: object
-                        type: array
-                        x-kubernetes-list-type: atomic
-                      matchLabels:
-                        additionalProperties:
-                          type: string
-                        description: |-
-                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
-                          map is equivalent to an element of matchExpressions, whose key field is "key", the
-                          operator is "In", and the values array contains only "value". The requirements are ANDed.
-                        type: object
-                    type: object
-                    x-kubernetes-map-type: atomic
-                  names:
-                    description: PVC names to include
-                    items:
-                      type: string
-                    type: array
-                  namespaces:
-                    description: Namespace selector
-                    items:
-                      type: string
-                    type: array
-                type: object
-              schedule:
-                description: Backup schedule configuration
-                properties:
-                  cron:
-                    description: Cron expression for backup schedule (e.g., "0 2 *
-                      * *" for daily at 2 AM)
-                    pattern: ^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
-                      (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
-                      (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1]))
-                      (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$
-                    type: string
-                  stopPods:
-                    description: Whether to stop pods during backup for data integrity
-                    type: boolean
-                  waitForHealthy:
-                    description: Wait for pod health before backup
-                    type: boolean
-                required:
-                - cron
-                type: object
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    names:
+                      description: A list of PVC names to select.
+                      items:
+                        type: string
+                      type: array
+                    namespaces:
+                      description: A list of namespaces to select PVCs from. If empty,
+                        it will search in all namespaces.
+                      items:
+                        type: string
+                      type: array
+                    stopPods:
+                      description: StopPods specifies whether to scale down workloads
+                        using the PVCs matched by this selector.
+                      type: boolean
+                  type: object
+                type: array
             required:
             - backupTargets
-            - pvcSelector
-            - schedule
+            - selectors
             type: object
           status:
             description: status defines the observed state of BackupConfig
@@ -467,10 +505,6 @@ spec:
                   - type
                   type: object
                 type: array
-              lastBackup:
-                description: Last backup timestamp
-                format: date-time
-                type: string
               lastRetentionCheck:
                 description: Last time retention policy was applied
                 format: date-time
@@ -480,10 +514,6 @@ spec:
                 items:
                   type: string
                 type: array
-              nextBackup:
-                description: Next backup timestamp
-                format: date-time
-                type: string
               restoreJobs:
                 description: Restore job statistics
                 properties:
@@ -508,6 +538,28 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              targets:
+                description: Status for each backup target.
+                items:
+                  description: BackupTargetStatus holds the status for a single backup
+                    target.
+                  properties:
+                    lastBackup:
+                      description: Last backup timestamp for this target.
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name of the backup target, matches one of the names
+                        in spec.backupTargets.
+                      type: string
+                    nextBackup:
+                      description: Next backup timestamp for this target.
+                      format: date-time
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
             type: object
         required:
         - spec

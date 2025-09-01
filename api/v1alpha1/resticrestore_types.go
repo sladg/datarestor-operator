@@ -95,6 +95,7 @@ type ResticRestoreStatus struct {
 //+kubebuilder:printcolumn:name="Backup",type="string",JSONPath=".spec.backupName"
 //+kubebuilder:printcolumn:name="Target PVC",type="string",JSONPath=".spec.targetPVC"
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+//+kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ResticRestore is the Schema for the resticrestores API

@@ -33,6 +33,9 @@ spec:
     - jsonPath: .spec.repositoryRef.name
       name: Repository
       type: string
+    - jsonPath: .status.duration
+      name: Duration
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -210,6 +213,9 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              duration:
+                description: Duration of the backup job as a string.
+                type: string
               error:
                 description: Error message if backup is in failed state
                 type: string
