@@ -75,7 +75,7 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Add finalizer if not present
-	if err := utils.AddFinalizer(ctx, r.Deps.Client, backupConfig, constants.BackupConfigFinalizer); err != nil {
+	if err := utils.AddFinalizer(ctx, r.Deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
 		log.Errorw("Failed to add finalizer", "error", err)
 		return ctrl.Result{}, err
 	}
@@ -86,15 +86,15 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
-	// Discover and claim PVCs
-	managedPVCs, err := logic.DiscoverAndClaimPVCs(ctx, r.Deps, backupConfig)
+	// Discover and match PVCs
+	managedPVCs, err := logic.DiscoverMatchingPVCs(ctx, r.Deps, backupConfig)
 	if err != nil {
-		log.Errorw("Failed to discover and claim PVCs", "error", err)
+		log.Errorw("Failed to discover and match PVCs", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
-	// Update status with managed PVCs
-	if err := logic.UpdateManagedPVCsStatus(ctx, r.Deps, backupConfig, managedPVCs); err != nil {
+	// Update status with managed PVCs count
+	if err := logic.UpdateStatusPVCsCount(ctx, r.Deps, backupConfig, managedPVCs); err != nil {
 		log.Errorw("Failed to update managed PVCs status", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}

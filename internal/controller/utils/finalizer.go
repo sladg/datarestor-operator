@@ -29,3 +29,8 @@ func RemoveFinalizer(ctx context.Context, deps *Dependencies, obj client.Object,
 	}
 	return nil
 }
+
+// ContainsFinalizer checks if a finalizer is present on the object
+func ContainsFinalizer(obj client.Object, finalizer string) bool {
+	return controllerutil.ContainsFinalizer(obj, finalizer)
+}

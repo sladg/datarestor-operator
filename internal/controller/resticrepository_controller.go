@@ -24,8 +24,8 @@ import (
 	utils "github.com/sladg/autorestore-backup-operator/internal/controller/utils"
 	logic "github.com/sladg/autorestore-backup-operator/internal/logic/resticrepository"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // NewResticRepositoryReconciler creates a new ResticRepositoryReconciler
@@ -73,45 +73,84 @@ func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(repository, constants.ResticRepositoryFinalizer) {
-		controllerutil.AddFinalizer(repository, constants.ResticRepositoryFinalizer)
-		if err := r.Deps.Client.Update(ctx, repository); err != nil {
-			log.Errorw("add finalizer failed", "error", err)
-			return ctrl.Result{}, err
-		}
+	if err := utils.AddFinalizer(ctx, r.Deps, repository, constants.ResticRepositoryFinalizer); err != nil {
+		log.Errorw("add finalizer failed", "error", err)
+		return ctrl.Result{}, err
 	}
 
 	// Use a pipeline to handle different phases
 	return utils.ProcessSteps(
+		// Initial state - check if repository exists and create if needed
 		utils.Step{
-			Condition: func() bool { return repository.Status.Phase == "" },
+			Condition: func() bool { return repository.Status.Phase == v1.PhaseUnknown },
 			Action: func() (ctrl.Result, error) {
-				return logic.HandleRepoInitialization(ctx, r.Deps, repository)
+				// Start initialization by transitioning to Pending
+				return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhasePending, metav1.Now(), "")
 			},
 		},
+		// Pending state - create init job
 		utils.Step{
 			Condition: func() bool { return repository.Status.Phase == v1.PhasePending },
 			Action: func() (ctrl.Result, error) {
-				return logic.HandleRepoInitializationStatus(ctx, r.Deps, repository)
+				// Create init job
+				job, err := logic.CreateInitJob(ctx, r.Deps, repository)
+				if err != nil {
+					log.Errorw("Failed to create init job", "error", err)
+					return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseFailed, metav1.Now(), "")
+				}
+
+				return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseRunning, metav1.Now(), job.Name)
 			},
 		},
+		// Running state - check job status
+		utils.Step{
+			Condition: func() bool { return repository.Status.Phase == v1.PhaseRunning },
+			Action: func() (ctrl.Result, error) {
+				job, err := logic.GetJobBySelector(ctx, r.Deps, repository, "init")
+				if err != nil {
+					return ctrl.Result{}, err
+				}
+				if job == nil {
+					log.Errorw("No init job found for repository, assuming failure")
+					return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseFailed, metav1.Now(), "")
+				}
+
+				if job.Status.Succeeded > 0 {
+					// Verify repository exists
+					err := logic.CheckRepositoryExists(ctx, r.Deps, repository)
+					if err == nil {
+						log.Info("Repository initialized and verified")
+						return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseCompleted, metav1.Now(), job.Name)
+					}
+					log.Errorw("Repository check failed after successful init", "error", err)
+					return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseFailed, metav1.Now(), job.Name)
+				}
+				if job.Status.Failed > 0 {
+					log.Errorw("Init job failed", "reason", job.Status.Conditions[0].Reason, "message", job.Status.Conditions[0].Message)
+					return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseFailed, metav1.Now(), job.Name)
+				}
+
+				log.Debug("Init job still running")
+				return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+			},
+		},
+		// Completed state - run maintenance
 		utils.Step{
 			Condition: func() bool { return repository.Status.Phase == v1.PhaseCompleted },
 			Action: func() (ctrl.Result, error) {
+				// Verify repository still exists
+				if err := logic.CheckRepositoryExists(ctx, r.Deps, repository); err != nil {
+					log.Errorw("Repository check failed during maintenance", "error", err)
+					return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseFailed, metav1.Now(), "")
+				}
 				return logic.HandleRepoMaintenance(ctx, r.Deps, repository)
 			},
 		},
+		// Failed state - wait for manual intervention
 		utils.Step{
 			Condition: func() bool { return repository.Status.Phase == v1.PhaseFailed },
 			Action: func() (ctrl.Result, error) {
 				return logic.HandleRepoFailed(ctx, r.Deps, repository)
-			},
-		},
-		utils.Step{
-			Condition: func() bool { return true }, // Default case
-			Action: func() (ctrl.Result, error) {
-				log.Info("unknown phase; initialize", "phase", repository.Status.Phase)
-				return logic.HandleRepoInitialization(ctx, r.Deps, repository)
 			},
 		},
 	)

@@ -27,29 +27,6 @@ func BuildRestoreJobCommand(_ string) ([]string, []string, error) {
 	return []string{"/bin/true"}, []string{}, nil
 }
 
-// JobOutput is a minimal placeholder returned by ReadJobOutput.
-type JobOutput struct {
-	Phase      string
-	Error      string
-	SnapshotID string
-	Size       string // Keep as string to match original `fmt.Sscanf` usage
-}
-
-// IsJobFailed checks if the job has failed.
-func (o *JobOutput) IsJobFailed() bool {
-	return o.Phase == "Failed"
-}
-
-// IsJobCompleted checks if the job has completed successfully.
-func (o *JobOutput) IsJobCompleted() bool {
-	return o.Phase == "Completed"
-}
-
-// ReadJobOutput returns a completed phase by default to advance controllers.
-func ReadJobOutput(_ context.Context, _ client.Client, _ string, _ string) (*JobOutput, error) {
-	return &JobOutput{Phase: "Completed", Error: "", SnapshotID: "stub-snapshot-id", Size: "12345"}, nil
-}
-
 // CreateRestoreJobWithOutput returns placeholder Job and ConfigMap objects.
 func CreateRestoreJobWithOutput(_ context.Context, _ client.Client, _ corev1.PersistentVolumeClaim, _ v1alpha1.BackupTarget, _ string, _ metav1.Object) (*batchv1.Job, *corev1.ConfigMap, error) {
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "stub-restore-job"}}
@@ -68,81 +45,6 @@ func GetRepositoryNameForTarget(target v1alpha1.BackupTarget) string {
 		return "repo-" + target.Name
 	}
 	return "repo-default"
-}
-
-// ApplyRetentionForTarget applies retention policy for a specific backup target
-func ApplyRetentionForTarget(ctx context.Context, deps *Dependencies, backupConfig *v1alpha1.BackupConfig, pvc *corev1.PersistentVolumeClaim, target v1alpha1.BackupTarget) error {
-	if target.Retention == nil || len(target.Retention.Args) == 0 {
-		// No retention policy configured for this target
-		return nil
-	}
-
-	logger := deps.Logger.Named("retention").With("target", target.Name)
-
-	// Get repository name for this target
-	repositoryName := GetRepositoryNameForTarget(target)
-
-	// Build restic forget command with user-provided args
-	command := []string{"restic", "forget"}
-	args := append([]string{"--repo", repositoryName}, target.Retention.Args...)
-
-	jobSpec := ResticJobSpec{
-		JobName:    fmt.Sprintf("retention-%s-%d", target.Name, time.Now().Unix()),
-		Namespace:  backupConfig.Namespace,
-		JobType:    "retention",
-		Repository: repositoryName,
-
-		Command: command,
-		Args:    args,
-		Env:     target.Restic.Env,
-		Image:   "restic/restic:latest", // TODO: Make configurable
-		Owner:   backupConfig,
-	}
-
-	// Add volume mounts if PVC is specified (for local storage)
-	if pvc != nil {
-		jobSpec.VolumeMounts = []corev1.VolumeMount{
-			{
-				Name:      "data",
-				MountPath: "/data",
-			},
-		}
-		jobSpec.Volumes = []corev1.Volume{
-			{
-				Name: "data",
-				VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: pvc.Name,
-					},
-				},
-			},
-		}
-	}
-
-	// Create and run the retention job
-	job, outputCM, err := CreateResticJobWithOutput(ctx, deps, jobSpec, backupConfig)
-	if err != nil {
-		return fmt.Errorf("failed to create retention job: %w", err)
-	}
-
-	logger.Infow("Created retention job", "job", job.Name, "args", target.Retention.Args)
-
-	// Wait for job completion (simplified - in production you'd want better async handling)
-	if err := deps.Client.Create(ctx, job); err != nil {
-		return fmt.Errorf("failed to create job: %w", err)
-	}
-	if err := deps.Client.Create(ctx, outputCM); err != nil {
-		return fmt.Errorf("failed to create output configmap: %w", err)
-	}
-
-	// Clean up the job after completion
-	defer func() {
-		if cleanupErr := CleanupJob(ctx, deps.Client, backupConfig.Namespace, job.Name); cleanupErr != nil {
-			logger.Warnw("Failed to cleanup retention job", "job", job.Name, "error", cleanupErr)
-		}
-	}()
-
-	return nil
 }
 
 // ResticJobSpec defines the specification for a restic job
@@ -183,7 +85,8 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 	// Use the job name from spec if provided, otherwise generate one
 	jobName := spec.JobName
 	if jobName == "" {
-		jobName = "restic-job-" + spec.JobType + "-" + string(rune(time.Now().Unix()))
+		// Generate a consistent name format: restic-{type}-{owner}-{timestamp}
+		jobName = fmt.Sprintf("restic-%s-%s-%d", spec.JobType, actualOwner.GetName(), time.Now().Unix())
 	}
 
 	labels := map[string]string{

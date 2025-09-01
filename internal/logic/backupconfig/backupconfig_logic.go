@@ -10,7 +10,6 @@ import (
 	"github.com/sladg/autorestore-backup-operator/internal/constants"
 	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -25,35 +24,15 @@ func HandleBackupConfigDeletion(ctx context.Context, deps *utils.Dependencies, b
 
 	log.Info("start")
 
-	if controllerutil.ContainsFinalizer(backupConfig, constants.BackupConfigFinalizer) {
+	if utils.ContainsFinalizer(backupConfig, constants.BackupConfigFinalizer) {
 		// Clean up any resources created by this BackupConfig
-		if err := cleanupBackupConfigResources(ctx, deps, backupConfig); err != nil {
-			log.Errorw("Failed to cleanup resources", "error", err)
-			// Don't return error to avoid blocking deletion
-		}
+		// NOTE: not needed as all resources are owned by the BackupConfig
 
-		// Release all managed PVCs
-		pvcList := &corev1.PersistentVolumeClaimList{}
-		if err := deps.Client.List(ctx, pvcList, client.InNamespace(backupConfig.Namespace)); err != nil {
-			log.Errorw("Failed to list PVCs for cleanup", "error", err)
-			// Continue with cleanup
-		} else {
-			for i := range pvcList.Items {
-				pvc := &pvcList.Items[i]
-				managedKey := fmt.Sprintf("%s/%s", backupConfig.Namespace, backupConfig.Name)
-				if managedBy, ok := pvc.Labels[constants.LabelManagedBy]; ok && managedBy == managedKey {
-					delete(pvc.Labels, constants.LabelManagedBy)
-					if err := deps.Client.Update(ctx, pvc); err != nil {
-						log.Errorw("remove managed-by label failed", "error", err)
-					}
-				}
-			}
-		}
+		// PVCs are kept in place.
 
 		// Remove finalizer
 		log.Debugw("Removing finalizer", "name", backupConfig.Name)
-		controllerutil.RemoveFinalizer(backupConfig, constants.BackupConfigFinalizer)
-		if err := deps.Client.Update(ctx, backupConfig); err != nil {
+		if err := utils.RemoveFinalizer(ctx, deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
 			log.Errorw("remove finalizer failed", "error", err)
 			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 		}
@@ -63,78 +42,36 @@ func HandleBackupConfigDeletion(ctx context.Context, deps *utils.Dependencies, b
 	return ctrl.Result{}, nil
 }
 
-// cleanupBackupConfigResources cleans up resources created by the BackupConfig
-func cleanupBackupConfigResources(ctx context.Context, deps *utils.Dependencies, backupConfig *backupv1alpha1.BackupConfig) error {
-	// Note: BackupJobs and RestoreJobs are automatically cleaned up by Kubernetes
-	// due to owner references, and their finalizers handle their own cleanup
-	//
-	// Kubernetes Jobs cleanup is handled by individual BackupJob/RestoreJob finalizers
-	// Restic cleanup is also handled by individual BackupJob finalizers
-	// This ensures each backup and its associated resources are properly cleaned up
-
-	return nil
-}
-
 // EnsureResticRepositories ensures that ResticRepository CRDs exist for all backup targets.
 func EnsureResticRepositories(ctx context.Context, deps *utils.Dependencies, backupConfig *backupv1alpha1.BackupConfig) error {
 	log := deps.Logger.Named("ensure-restic-repositories")
 	log.Info("Ensuring ResticRepository CRDs exist for all backup targets")
 
 	for _, target := range backupConfig.Spec.BackupTargets {
-		repoName := fmt.Sprintf("%s-%s", backupConfig.Name, target.Name)
-		repository := &backupv1alpha1.ResticRepository{}
-		err := deps.Client.Get(ctx, types.NamespacedName{Name: repoName, Namespace: backupConfig.Namespace}, repository)
-		if err == nil {
-			// Repository exists, ensure ownership
+		// Use selector-based matching for ResticRepository
+		repoSelector := backupv1alpha1.Selector{
+			Names:      []string{target.Repository.Name},
+			Namespaces: []string{backupConfig.Namespace},
+		}
+		repoList := &backupv1alpha1.ResticRepositoryList{}
+		repos, err := utils.FindMatchingResources[*backupv1alpha1.ResticRepository](ctx, deps, []backupv1alpha1.Selector{repoSelector}, repoList)
+		if err != nil {
+			return fmt.Errorf("failed to find repository: %w", err)
+		}
+		if len(repos) == 0 {
+			// Not found, skip
+			continue
+		}
+		for _, repository := range repos {
 			if !isOwnedByBackupConfig(repository, backupConfig) {
 				if err := controllerutil.SetControllerReference(backupConfig, repository, deps.Scheme); err == nil {
 					_ = deps.Client.Update(ctx, repository)
 				}
 			}
-			continue
-		}
-		if !errors.IsNotFound(err) {
-			return fmt.Errorf("failed to check repository existence: %w", err)
-		}
-
-		// Create new repository
-		repo := &backupv1alpha1.ResticRepository{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      repoName,
-				Namespace: backupConfig.Namespace,
-				Labels: map[string]string{
-					"backup-config": backupConfig.Name,
-					"target":        target.Name,
-				},
-			},
-			Spec: backupv1alpha1.ResticRepositorySpec{
-				Target: target.Restic.Target,
-				Env:    target.Restic.Env,
-				Args:   target.Restic.Args,
-				Image:  target.Restic.Image,
-			},
-		}
-		if err := controllerutil.SetControllerReference(backupConfig, repo, deps.Scheme); err != nil {
-			return fmt.Errorf("failed to set controller reference: %w", err)
-		}
-		if err := deps.Client.Create(ctx, repo); err != nil {
-			return fmt.Errorf("failed to create repository: %w", err)
 		}
 	}
 
 	return nil
-}
-
-// isOwnedByBackupConfig checks if a ResticRepository is owned by the given BackupConfig.
-func isOwnedByBackupConfig(repo *backupv1alpha1.ResticRepository, backupConfig *backupv1alpha1.BackupConfig) bool {
-	for _, ownerRef := range repo.OwnerReferences {
-		if ownerRef.Kind == "BackupConfig" &&
-			ownerRef.Name == backupConfig.Name &&
-			ownerRef.UID == backupConfig.UID {
-			return true
-		}
-	}
-	return false
 }
 
 // HandleAutoRestore handles the auto-restore logic for newly claimed PVCs.
@@ -225,6 +162,90 @@ func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backu
 					time.Now().Unix())
 
 				if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, *target); err != nil {
+					log.Errorw("Failed to create scheduled backup",
+						"pvc", pvc.Name,
+						"target", target.Name,
+						"error", err)
+					continue
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// HandleSchedule processes scheduled backups for all PVCs managed by the BackupConfig.
+// For each target with a backup schedule:
+//  1. Finds all managed PVCs
+//  2. Checks the last successful backup for each PVC
+//  3. Creates new backups when needed based on the schedule
+//
+// The function ensures each PVC is backed up according to its target's schedule,
+// tracking the last successful backup to prevent unnecessary operations.
+func HandleSchedule(ctx context.Context, deps *utils.Dependencies, backupConfig *backupv1alpha1.BackupConfig, managedPVCs []string) error {
+	log := deps.Logger.Named("handle-schedule")
+
+	// Find all managed PVCs once since we'll need them for all targets
+	selector := backupv1alpha1.Selector{
+		Names:      managedPVCs,
+		Namespaces: []string{backupConfig.Namespace},
+	}
+
+	pvcs, err := utils.FindMatchingPVCs(ctx, deps, &selector)
+	if err != nil {
+		log.Errorw("Failed to find managed PVCs", "error", err)
+		return err
+	}
+
+	// Get existing ResticBackups to check their status using selector
+	backupSelector := backupv1alpha1.Selector{
+		Namespaces: []string{backupConfig.Namespace},
+		LabelSelector: &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"backup-config": backupConfig.Name,
+			},
+		},
+	}
+
+	backupList := &backupv1alpha1.ResticBackupList{}
+	existingBackups, err := utils.FindMatchingResources[*backupv1alpha1.ResticBackup](ctx, deps, []backupv1alpha1.Selector{backupSelector}, backupList)
+	if err != nil {
+		log.Errorw("Failed to find existing backups", "error", err)
+		return err
+	}
+
+	// Process each backup target that has a schedule
+	for i := range backupConfig.Spec.BackupTargets {
+		target := &backupConfig.Spec.BackupTargets[i]
+		if target.BackupSchedule == "" {
+			continue // Skip targets without schedule
+		}
+
+		// Process each PVC for this target
+		for _, pvc := range pvcs {
+			// Find the latest successful backup for this PVC and target
+			var lastBackupTime *time.Time
+			for _, backup := range existingBackups {
+				if backup.Labels["pvc"] == pvc.Name && backup.Labels["backup-target"] == target.Name {
+					if backup.Status.CompletionTime != nil && backup.Status.Phase == backupv1alpha1.PhaseCompleted {
+						t := backup.Status.CompletionTime.Time
+						if lastBackupTime == nil || t.After(*lastBackupTime) {
+							lastBackupTime = &t
+						}
+					}
+				}
+			}
+
+			// Create new backup if needed based on schedule
+			if utils.ShouldPerformBackup(target.BackupSchedule, lastBackupTime) {
+				log.Infow("Creating scheduled backup",
+					"target", target.Name,
+					"pvc", pvc.Name,
+					"lastBackup", lastBackupTime)
+
+				backupName := getScheduledBackupName(backupConfig.Name, target.Name, pvc.Name)
+				if err := createResticBackup(ctx, deps, backupConfig, &pvc, backupName, *target); err != nil {
 					log.Errorw("Failed to create scheduled backup",
 						"pvc", pvc.Name,
 						"target", target.Name,

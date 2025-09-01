@@ -26,6 +26,8 @@ import (
 // ========================================
 
 // Generic operation phases (used across all CRDs)
+type Phase string
+
 const (
 	PhaseUnknown   = ""
 	PhasePending   = "Pending"   // Initial state, not yet started
@@ -63,7 +65,7 @@ const (
 type CommonStatus struct {
 	// Current phase of the operation
 	// +optional
-	Phase string `json:"phase,omitempty"`
+	Phase Phase `json:"phase,omitempty"`
 
 	// Error message if operation failed
 	// +optional

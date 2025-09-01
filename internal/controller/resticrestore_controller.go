@@ -25,7 +25,6 @@ import (
 	logic "github.com/sladg/autorestore-backup-operator/internal/logic/resticrestore"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // NewResticRestoreReconciler creates a new ResticRestoreReconciler
@@ -74,10 +73,9 @@ func (r *ResticRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Add finalizer if missing
-	if !controllerutil.ContainsFinalizer(resticRestore, constants.ResticRestoreFinalizer) {
-		log.Debug("Adding finalizer")
-		controllerutil.AddFinalizer(resticRestore, constants.ResticRestoreFinalizer)
-		return ctrl.Result{}, r.Deps.Client.Update(ctx, resticRestore)
+	if err := utils.AddFinalizer(ctx, r.Deps, resticRestore, constants.ResticRestoreFinalizer); err != nil {
+		log.Errorw("Failed to add finalizer", "error", err)
+		return ctrl.Result{}, err
 	}
 
 	// Use a pipeline to handle different phases
