@@ -26,6 +26,8 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/robfig/cron/v3"
+	uberzap "go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -39,6 +41,7 @@ import (
 
 	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	"github.com/sladg/autorestore-backup-operator/internal/controller"
+	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -65,6 +68,7 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	var developmentLogging bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -82,13 +86,27 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	opts := zap.Options{
-		Development: true,
-	}
-	opts.BindFlags(flag.CommandLine)
+	flag.BoolVar(&developmentLogging, "development-logging", true, "Enable development-friendly, console-based logging.")
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	// Use a more configurable zap logger
+	var zapLogger *uberzap.Logger
+	var err error
+	if developmentLogging {
+		zapLogger, err = uberzap.NewDevelopment()
+	} else {
+		zapLogger, err = uberzap.NewProduction()
+	}
+	if err != nil {
+		setupLog.Error(err, "unable to create zap logger")
+		os.Exit(1)
+	}
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zap.Options{
+		Development: developmentLogging,
+	}))) // Set controller-runtime's logger
+
+	// Set the global zap logger so zap.S() works correctly
+	uberzap.ReplaceGlobals(zapLogger)
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
@@ -203,34 +221,47 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create common dependencies object
+	deps := &utils.Dependencies{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Config:     mgr.GetConfig(),
+		Logger:     zapLogger.Sugar(),
+		CronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+	}
+
 	// Setup BackupConfig controller
-	backupConfigReconciler, err := controller.NewBackupConfigReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
+	backupConfigController, err := controller.NewBackupConfigReconciler(deps)
 	if err != nil {
-		setupLog.Error(err, "unable to create BackupConfigReconciler")
+		setupLog.Error(err, "unable to create BackupConfig controller")
 		os.Exit(1)
 	}
-	if err := backupConfigReconciler.SetupWithManager(mgr); err != nil {
+	if err = backupConfigController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BackupConfig")
 		os.Exit(1)
 	}
 
 	// Setup ResticRestore controller
-	resticRestoreReconciler := controller.NewResticRestoreReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
-	if err := resticRestoreReconciler.SetupWithManager(mgr); err != nil {
+	resticRestoreController := controller.NewResticRestoreReconciler(deps)
+	if err = resticRestoreController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ResticRestore")
 		os.Exit(1)
 	}
 
 	// Setup ResticRepository controller
-	resticRepositoryReconciler := controller.NewResticRepositoryReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
-	if err := resticRepositoryReconciler.SetupWithManager(mgr); err != nil {
+	resticRepositoryController, err := controller.NewResticRepositoryReconciler(deps)
+	if err != nil {
+		setupLog.Error(err, "unable to create ResticRepository controller")
+		os.Exit(1)
+	}
+	if err = resticRepositoryController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ResticRepository")
 		os.Exit(1)
 	}
 
 	// Setup ResticBackup controller
-	resticBackupReconciler := controller.NewResticBackupReconciler(mgr.GetClient(), mgr.GetScheme(), mgr.GetConfig())
-	if err := resticBackupReconciler.SetupWithManager(mgr); err != nil {
+	resticBackupController := controller.NewResticBackupReconciler(deps)
+	if err = resticBackupController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ResticBackup")
 		os.Exit(1)
 	}

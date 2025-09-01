@@ -154,13 +154,13 @@ These fields represent the observed state of the `BackupConfig`.
 
 #### Spec Details (`kubectl describe`)
 
-| Field             | Type           | Description                                                            |
-| ----------------- | -------------- | ---------------------------------------------------------------------- |
-| `backupName`      | `string`       | The name of the `ResticBackup` CRD to restore from.                    |
-| `targetPVC`       | `string`       | The name of the PVC to restore the data into.                          |
-| `createTargetPVC` | `bool`         | If true, the operator will create the `targetPVC` if it doesn't exist. |
-| `backupTarget`    | `BackupTarget` | The Restic repository configuration to use for the restore operation.  |
-| `overwrite`       | `bool`         | If true, existing data in the `targetPVC` will be overwritten.         |
+| Field                   | Type           | Description                                                                    |
+| ----------------------- | -------------- | ------------------------------------------------------------------------------ |
+| `backupName`            | `string`       | The name of the `ResticBackup` CRD to restore from.                            |
+| `targetPVC`             | `string`       | The name of the PVC to restore the data into.                                  |
+| `backupTarget`          | `BackupTarget` | The Restic repository configuration to use for the restore operation.          |
+| `additionalRestoreArgs` | `[]string`     | Additional arguments to pass to the restic restore command.                    |
+| `snapshotID`            | `string`       | Specific snapshot ID to restore from (optional, uses latest if not specified). |
 
 #### Status Details (`kubectl describe`)
 
@@ -406,7 +406,7 @@ This controller also uses a phase-based approach to manage the one-shot restore 
     - **Concurrency Check**: Similar to the backup controller, it first checks if another backup or restore job is already running for the `targetPVC`. If so, it waits and requeues.
     - It performs pre-flight checks:
       - Validates that the referenced `ResticBackup` exists.
-      - Checks if the `targetPVC` exists. If it doesn't, and `spec.createTargetPVC` is true, it creates the PVC.
+      - Checks if the `targetPVC` exists.
     - Once validations pass, it creates a Kubernetes Job to run the `restic restore` command.
     - It transitions the phase to `Running`.
 
@@ -471,7 +471,7 @@ For a complete, commented example of a `BackupConfig` resource, please see the [
 
 - Retention policy (per-target): Each `BackupTarget` may define retention rules such as `keepLast`, `keepHourly`, `keepDaily`, `keepWeekly`, `keepMonthly`, or `keepWithin` (duration). The controller applies these rules per target during retention.
 
-- Restore overwrite semantics: When `overwrite` is true, existing data in the target PVC may be replaced. It is recommended to pause workloads by scaling them to 0 during restore to avoid data races or application-level corruption.
+- Restore behavior: Use `additionalRestoreArgs` to control restore behavior (e.g., `--exclude` patterns, `--include` patterns). It is recommended to pause workloads by scaling them to 0 during restore to avoid data races or application-level corruption.
 
 ---
 

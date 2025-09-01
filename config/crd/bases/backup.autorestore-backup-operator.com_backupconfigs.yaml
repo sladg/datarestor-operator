@@ -15,24 +15,15 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.matchingPVCs
+    - jsonPath: .status.pvcsCount
       name: PVCs
       type: integer
-    - jsonPath: .status.backupTargets
+    - jsonPath: .status.targetsCount
       name: Targets
       type: integer
-    - jsonPath: .status.backupJobs.successful
-      name: Backup Success
-      type: integer
-    - jsonPath: .status.backupJobs.running
-      name: Backup Running
-      type: integer
-    - jsonPath: .status.backupJobs.failed
-      name: Backup Failed
-      type: integer
-    - jsonPath: .status.restoreJobs.successful
-      name: Restore Success
-      type: integer
+    - jsonPath: .spec.autoRestore
+      name: Auto-Restore
+      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -69,6 +60,14 @@ spec:
                 items:
                   description: BackupTarget defines a backup destination with priority
                   properties:
+                    backupSchedule:
+                      description: Cron expression for backup schedule (e.g., "0 2
+                        * * *" for daily at 2 AM)
+                      pattern: ^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
+                        (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
+                        (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1]))
+                        (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$
+                      type: string
                     name:
                       description: Name of the backup target
                       type: string
@@ -77,269 +76,30 @@ spec:
                         (lower number = higher priority)
                       format: int32
                       type: integer
-                    restic:
-                      description: Restic configuration for backup targets
+                    repository:
+                      description: Reference to the ResticRepository to use for backups
                       properties:
-                        additionalFlags:
-                          description: |-
-                            Additional flags to pass directly to the restic backup command.
-                            Use with caution, as invalid flags can break backup operations.
-                            Flags that conflict with the operator's core functionality (e.g., --repo, --json) will be ignored.
-                          items:
-                            type: string
-                          type: array
-                        env:
-                          description: Environment variables for authentication (e.g.,
-                            AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-                          items:
-                            description: EnvVar represents an environment variable
-                              present in a Container.
-                            properties:
-                              name:
-                                description: Name of the environment variable. Must
-                                  be a C_IDENTIFIER.
-                                type: string
-                              value:
-                                description: |-
-                                  Variable references $(VAR_NAME) are expanded
-                                  using the previously defined environment variables in the container and
-                                  any service environment variables. If a variable cannot be resolved,
-                                  the reference in the input string will be unchanged. Double $$ are reduced
-                                  to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
-                                  "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
-                                  Escaped references will never be expanded, regardless of whether the variable
-                                  exists or not.
-                                  Defaults to "".
-                                type: string
-                              valueFrom:
-                                description: Source for the environment variable's
-                                  value. Cannot be used if value is not empty.
-                                properties:
-                                  configMapKeyRef:
-                                    description: Selects a key of a ConfigMap.
-                                    properties:
-                                      key:
-                                        description: The key to select.
-                                        type: string
-                                      name:
-                                        default: ""
-                                        description: |-
-                                          Name of the referent.
-                                          This field is effectively required, but due to backwards compatibility is
-                                          allowed to be empty. Instances of this type with an empty value here are
-                                          almost certainly wrong.
-                                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                        type: string
-                                      optional:
-                                        description: Specify whether the ConfigMap
-                                          or its key must be defined
-                                        type: boolean
-                                    required:
-                                    - key
-                                    type: object
-                                    x-kubernetes-map-type: atomic
-                                  fieldRef:
-                                    description: |-
-                                      Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
-                                      spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
-                                    properties:
-                                      apiVersion:
-                                        description: Version of the schema the FieldPath
-                                          is written in terms of, defaults to "v1".
-                                        type: string
-                                      fieldPath:
-                                        description: Path of the field to select in
-                                          the specified API version.
-                                        type: string
-                                    required:
-                                    - fieldPath
-                                    type: object
-                                    x-kubernetes-map-type: atomic
-                                  resourceFieldRef:
-                                    description: |-
-                                      Selects a resource of the container: only resources limits and requests
-                                      (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
-                                    properties:
-                                      containerName:
-                                        description: 'Container name: required for
-                                          volumes, optional for env vars'
-                                        type: string
-                                      divisor:
-                                        anyOf:
-                                        - type: integer
-                                        - type: string
-                                        description: Specifies the output format of
-                                          the exposed resources, defaults to "1"
-                                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                                        x-kubernetes-int-or-string: true
-                                      resource:
-                                        description: 'Required: resource to select'
-                                        type: string
-                                    required:
-                                    - resource
-                                    type: object
-                                    x-kubernetes-map-type: atomic
-                                  secretKeyRef:
-                                    description: Selects a key of a secret in the
-                                      pod's namespace
-                                    properties:
-                                      key:
-                                        description: The key of the secret to select
-                                          from.  Must be a valid secret key.
-                                        type: string
-                                      name:
-                                        default: ""
-                                        description: |-
-                                          Name of the referent.
-                                          This field is effectively required, but due to backwards compatibility is
-                                          allowed to be empty. Instances of this type with an empty value here are
-                                          almost certainly wrong.
-                                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                        type: string
-                                      optional:
-                                        description: Specify whether the Secret or
-                                          its key must be defined
-                                        type: boolean
-                                    required:
-                                    - key
-                                    type: object
-                                    x-kubernetes-map-type: atomic
-                                type: object
-                            required:
-                            - name
-                            type: object
-                          type: array
-                        host:
-                          description: Hostname for backup identification
+                        name:
+                          description: Name of the ResticRepository
                           type: string
-                        image:
-                          description: Image for the restic job
-                          type: string
-                        passwordSecretRef:
-                          description: |-
-                            Secret containing the password for the restic repository.
-                            The secret must contain a key named 'password'.
-                          properties:
-                            key:
-                              description: The key of the secret to select from.  Must
-                                be a valid secret key.
-                              type: string
-                            name:
-                              default: ""
-                              description: |-
-                                Name of the referent.
-                                This field is effectively required, but due to backwards compatibility is
-                                allowed to be empty. Instances of this type with an empty value here are
-                                almost certainly wrong.
-                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                              type: string
-                            optional:
-                              description: Specify whether the Secret or its key must
-                                be defined
-                              type: boolean
-                          required:
-                          - key
-                          type: object
-                          x-kubernetes-map-type: atomic
-                        repository:
-                          description: Restic repository URL (e.g., s3:s3.amazonaws.com/bucket)
-                          type: string
-                        tags:
-                          description: Backup tags for organization
-                          items:
-                            type: string
-                          type: array
                       required:
-                      - passwordSecretRef
-                      - repository
+                      - name
                       type: object
-                    retention:
-                      description: Retention policy for this target
-                      properties:
-                        keepDaily:
-                          description: Keep the most recent snapshot for each of the
-                            last n days (restic --keep-daily)
-                          format: int32
-                          type: integer
-                        keepHourly:
-                          description: Keep the most recent snapshot for each of the
-                            last n hours (restic --keep-hourly)
-                          format: int32
-                          type: integer
-                        keepLast:
-                          description: Keep the last n snapshots (restic --keep-last)
-                          format: int32
-                          type: integer
-                        keepMonthly:
-                          description: Keep the most recent snapshot for each of the
-                            last n months (restic --keep-monthly)
-                          format: int32
-                          type: integer
-                        keepTags:
-                          description: Keep snapshots with these tags (restic --keep-tag)
-                          items:
-                            type: string
-                          type: array
-                        keepWeekly:
-                          description: Keep the most recent snapshot for each of the
-                            last n weeks (restic --keep-weekly)
-                          format: int32
-                          type: integer
-                        keepWithin:
-                          description: Keep all snapshots within this duration (restic
-                            --keep-within, e.g. "2y5m7d3h")
-                          type: string
-                        keepYearly:
-                          description: Keep the most recent snapshot for each of the
-                            last n years (restic --keep-yearly)
-                          format: int32
-                          type: integer
-                        maxSnapshots:
-                          description: 'Deprecated: Use KeepLast instead'
-                          format: int32
-                          type: integer
-                        prune:
-                          default: true
-                          description: Whether to run prune automatically after forget
-                            (restic --prune)
-                          type: boolean
-                        schedule:
-                          default: 0 3 * * *
-                          description: |-
-                            Cron schedule for retention checks (e.g., "0 3 * * *" for daily at 3 AM)
-                            If not specified, defaults to "0 3 * * *"
-                          pattern: ^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
-                            (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
-                            (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1]))
-                            (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$
-                          type: string
-                      type: object
-                    schedule:
-                      description: Backup schedule for this target
-                      properties:
-                        cron:
-                          description: Cron expression for backup schedule (e.g.,
-                            "0 2 * * *" for daily at 2 AM)
-                          pattern: ^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
-                            (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
-                            (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1]))
-                            (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$
-                          type: string
-                        stopPods:
-                          description: Whether to stop pods during backup for data
-                            integrity
-                          type: boolean
-                        waitForHealthy:
-                          description: Wait for pod health before backup
-                          type: boolean
-                      required:
-                      - cron
-                      type: object
+                    retentionSchedule:
+                      default: 0 3 * * *
+                      description: |-
+                        Cron schedule for retention checks (e.g., "0 3 * * *" for daily at 3 AM)
+                        If not specified, defaults to "0 3 * * *"
+                      pattern: ^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
+                        (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9]))
+                        (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1]))
+                        (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$
+                      type: string
                   required:
+                  - backupSchedule
                   - name
                   - priority
-                  - restic
-                  - schedule
+                  - repository
                   type: object
                 type: array
               selectors:
@@ -415,6 +175,9 @@ spec:
                       description: StopPods specifies whether to scale down workloads
                         using the PVCs matched by this selector.
                       type: boolean
+                    waitForHealthy:
+                      description: Wait for pod health before backup
+                      type: boolean
                   type: object
                 type: array
             required:
@@ -422,32 +185,12 @@ spec:
             - selectors
             type: object
           status:
-            description: status defines the observed state of BackupConfig
+            description: status contains the observed state
             properties:
-              backupJobs:
-                description: Backup job statistics
-                properties:
-                  failed:
-                    description: Number of failed jobs
-                    format: int32
-                    type: integer
-                  pending:
-                    description: Number of pending jobs
-                    format: int32
-                    type: integer
-                  running:
-                    description: Number of currently running jobs
-                    format: int32
-                    type: integer
-                  successful:
-                    description: Number of successful jobs
-                    format: int32
-                    type: integer
-                  total:
-                    description: Total number of jobs
-                    format: int32
-                    type: integer
-                type: object
+              completionTime:
+                description: Time when the operation completed
+                format: date-time
+                type: string
               conditions:
                 description: Conditions represent the latest available observations
                 items:
@@ -505,61 +248,36 @@ spec:
                   - type
                   type: object
                 type: array
-              lastRetentionCheck:
-                description: Last time retention policy was applied
-                format: date-time
+              error:
+                description: Error message if operation failed
                 type: string
-              managedPVCs:
-                description: List of PVCs being managed
+              phase:
+                description: Current phase of the operation
+                type: string
+              pvcsCount:
+                description: Number of PVCs currently selected by this config
+                format: int32
+                type: integer
+              repositories:
+                description: List of repositories managed by this config
                 items:
-                  type: string
-                type: array
-              restoreJobs:
-                description: Restore job statistics
-                properties:
-                  failed:
-                    description: Number of failed jobs
-                    format: int32
-                    type: integer
-                  pending:
-                    description: Number of pending jobs
-                    format: int32
-                    type: integer
-                  running:
-                    description: Number of currently running jobs
-                    format: int32
-                    type: integer
-                  successful:
-                    description: Number of successful jobs
-                    format: int32
-                    type: integer
-                  total:
-                    description: Total number of jobs
-                    format: int32
-                    type: integer
-                type: object
-              targets:
-                description: Status for each backup target.
-                items:
-                  description: BackupTargetStatus holds the status for a single backup
-                    target.
+                  description: ResticRepositoryRef contains a reference to a ResticRepository
                   properties:
-                    lastBackup:
-                      description: Last backup timestamp for this target.
-                      format: date-time
-                      type: string
                     name:
-                      description: Name of the backup target, matches one of the names
-                        in spec.backupTargets.
-                      type: string
-                    nextBackup:
-                      description: Next backup timestamp for this target.
-                      format: date-time
+                      description: Name of the ResticRepository
                       type: string
                   required:
                   - name
                   type: object
                 type: array
+              startTime:
+                description: Time when the operation started
+                format: date-time
+                type: string
+              targetsCount:
+                description: Number of backup targets
+                format: int32
+                type: integer
             type: object
         required:
         - spec

@@ -8,7 +8,7 @@ rules:
       - ""
     resources:
       - configmaps
-      - persistentvolumeclaims
+      - secrets
     verbs:
       - create
       - delete
@@ -20,19 +20,14 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - events
+      - persistentvolumeclaims
     verbs:
       - create
-      - patch
-  - apiGroups:
-      - ""
-    resources:
-      - persistentvolumeclaims/status
-      - pods/status
-    verbs:
       - get
+      - list
       - patch
       - update
+      - watch
   - apiGroups:
       - ""
     resources:
@@ -75,7 +70,6 @@ rules:
       - backupconfigs/finalizers
       - resticbackups/finalizers
       - resticrepositories/finalizers
-      - resticrestores/finalizers
     verbs:
       - update
   - apiGroups:
@@ -84,6 +78,40 @@ rules:
       - backupconfigs/status
       - resticbackups/status
       - resticrepositories/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - backup.autorestore.com
+    resources:
+      - resticbackups
+      - resticrepositories
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - backup.autorestore.com
+    resources:
+      - resticrestores
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - backup.autorestore.com
+    resources:
+      - resticrestores/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - backup.autorestore.com
+    resources:
       - resticrestores/status
     verbs:
       - get

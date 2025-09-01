@@ -17,113 +17,67 @@ limitations under the License.
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ResticBackupSpec defines the desired state of ResticBackup (merged with BackupJob)
+// ResticBackupSpec defines the desired state of ResticBackup
 type ResticBackupSpec struct {
-	// Human-readable backup name
+	// Reference to the ResticRepository in the same namespace
 	// +required
-	BackupName string `json:"backupName"`
+	Repository ResticRepositoryRef `json:"repository"`
 
-	// PVC that was/is being backed up
-	// +required
-	PVCRef PVCReference `json:"pvcRef"`
-
-	// Reference to the ResticRepository where this backup is stored
-	// +required
-	RepositoryRef corev1.LocalObjectReference `json:"repositoryRef"`
-
-	// Backup type (scheduled, manual, auto-restore)
-	// +optional
-	// +kubebuilder:default="scheduled"
-	BackupType string `json:"backupType,omitempty"`
-
-	// Restic snapshot ID (populated when backup completes successfully)
-	// +optional
-	SnapshotID string `json:"snapshotID,omitempty"`
-
-	// Tags associated with this backup
-	// +optional
-	Tags []string `json:"tags,omitempty"`
-}
-
-// PVCReference contains PVC information for cross-namespace references
-type PVCReference struct {
-	// Name of the PVC
+	// Name of the backup
 	// +required
 	Name string `json:"name"`
 
-	// Namespace of the PVC
+	// Type of backup (scheduled, manual)
+	// +optional
+	// +kubebuilder:default="scheduled"
+	// +kubebuilder:validation:Enum=scheduled;manual;auto-restore
+	Type BackupType `json:"type,omitempty"`
+
+	// PVC that was/is being backed up
 	// +required
-	Namespace string `json:"namespace"`
+	SourcePVC PersistentVolumeClaimRef `json:"sourcePVC"`
+
+	// Restic configuration for restore target
+	// +required
+	Restic ResticRepositorySpec `json:"restic"`
+
+	// Arguments to pass to restic restore command
+	// Examples: ["--path", "/data", "--include", "*.sql", "--exclude", "cache/"]
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// Specific snapshot ID to restore from (optional, uses latest if not specified)
+	// +optional
+	SnapshotID string `json:"snapshotID,omitempty"`
 }
 
 // ResticBackupStatus defines the observed state of ResticBackup (merged with BackupJob)
 type ResticBackupStatus struct {
-	// Current phase of the backup (Pending, Running, Completed, Ready, Failed)
-	// +optional
-	// +kubebuilder:validation:Enum=Pending;Running;Completed;Ready;Failed
-	Phase string `json:"phase,omitempty"`
+	// Embed common status fields
+	CommonStatus `json:",inline"`
 
-	// Time when the backup job started
+	// Reference to the backup job
 	// +optional
-	StartTime *metav1.Time `json:"startTime,omitempty"`
-
-	// Time when the backup job completed
-	// +optional
-	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-
-	// Time when the backup was created in the repository
-	// +optional
-	BackupTime *metav1.Time `json:"backupTime,omitempty"`
-
-	// Reference to the Kubernetes Job that executed the backup
-	// +optional
-	BackupJobRef *corev1.LocalObjectReference `json:"backupJobRef,omitempty"`
-
-	// Reference to the verification job (if any)
-	// +optional
-	VerificationJobRef *corev1.LocalObjectReference `json:"verificationJobRef,omitempty"`
-
-	// Reference to the deletion job (if any)
-	// +optional
-	DeletionJobRef *corev1.LocalObjectReference `json:"deletionJobRef,omitempty"`
-
-	// Backup ID assigned by the system (for tracking)
-	// +optional
-	BackupID string `json:"backupID,omitempty"`
-
-	// Size of the backup in bytes
-	// +optional
-	Size int64 `json:"size,omitempty"`
-
-	// Last time this backup's existence was verified in the repository
-	// +optional
-	LastVerified *metav1.Time `json:"lastVerified,omitempty"`
-
-	// Error message if backup is in failed state
-	// +optional
-	Error string `json:"error,omitempty"`
+	Job JobReference `json:"job,omitempty"`
 
 	// Duration of the backup job as a string.
 	// +optional
-	Duration string `json:"duration,omitempty"`
+	Duration *metav1.Duration `json:"duration,omitempty"`
 
-	// Conditions represent the latest available observations
+	// Time when the backup was created in the repository
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Backup Name",type="string",JSONPath=".spec.backupName"
-// +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.pvcRef.name"
+// +kubebuilder:printcolumn:name="Backup Name",type="string",JSONPath=".spec.name"
+// +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.sourcePVC.name"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
-// +kubebuilder:printcolumn:name="Snapshot ID",type="string",JSONPath=".spec.snapshotID"
-// +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.size"
-// +kubebuilder:printcolumn:name="Repository",type="string",JSONPath=".spec.repositoryRef.name"
+// +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
 // +kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
@@ -134,6 +88,15 @@ type ResticBackup struct {
 
 	Spec   ResticBackupSpec   `json:"spec,omitempty"`
 	Status ResticBackupStatus `json:"status,omitempty"`
+}
+
+// GetLogValues returns key-value pairs for structured logging.
+func (r *ResticBackup) GetLogValues() []interface{} {
+	return []interface{}{
+		"backup", r.Name,
+		"namespace", r.Namespace,
+		"phase", r.Status.Phase,
+	}
 }
 
 // +kubebuilder:object:root=true

@@ -17,84 +17,64 @@ limitations under the License.
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ResticRestoreSpec defines the desired state of ResticRestore
 type ResticRestoreSpec struct {
+	// Reference to the ResticRepository in the same namespace
+	// +required
+	Repository ResticRepositoryRef `json:"repository"`
+
 	// Name of the ResticBackup to restore from
 	// +required
-	BackupName string `json:"backupName"`
+	Name string `json:"name"`
+
+	// +required
+	Type RestoreType `json:"type,omitempty"`
 
 	// Target PVC name to restore data into
 	// +required
-	TargetPVC string `json:"targetPVC"`
+	TargetPVC PersistentVolumeClaimRef `json:"targetPVC"`
 
-	// Whether to create the target PVC if it doesn't exist
-	// +optional
-	// +kubebuilder:default=false
-	CreateTargetPVC bool `json:"createTargetPVC,omitempty"`
-
-	// Template for creating the target PVC (used when CreateTargetPVC is true)
-	// +optional
-	TargetPVCTemplate *corev1.PersistentVolumeClaim `json:"targetPVCTemplate,omitempty"`
-
-	// Backup target configuration for restore
+	// Restic configuration for restore target
 	// +required
-	BackupTarget BackupTarget `json:"backupTarget"`
+	Restic ResticRepositorySpec `json:"restic"`
 
-	// Whether to overwrite existing data in the PVC
+	// Arguments to pass to restic restore command
+	// Examples: ["--path", "/data", "--include", "*.sql", "--exclude", "cache/"]
 	// +optional
-	// +kubebuilder:default=false
-	Overwrite bool `json:"overwrite,omitempty"`
+	Args []string `json:"args,omitempty"`
 
-	// Paths to restore (if empty, restore everything)
+	// Specific snapshot ID to restore from (optional, uses latest if not specified)
 	// +optional
-	Paths []string `json:"paths,omitempty"`
+	SnapshotID string `json:"snapshotID,omitempty"`
 }
 
 // ResticRestoreStatus defines the observed state of ResticRestore
 type ResticRestoreStatus struct {
-	// Current phase of the restore (Pending, Running, Completed, Failed)
-	// +optional
-	// +kubebuilder:validation:Enum=Pending;Running;Completed;Failed
-	Phase string `json:"phase,omitempty"`
+	// Embed common status fields
+	CommonStatus `json:",inline"`
 
-	// Time when the restore started
+	// Reference to the restore job
 	// +optional
-	StartTime *metav1.Time `json:"startTime,omitempty"`
-
-	// Time when the restore completed
-	// +optional
-	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-
-	// Reference to the underlying Kubernetes Job
-	// +optional
-	JobRef *corev1.LocalObjectReference `json:"jobRef,omitempty"`
-
-	// Error message if the restore failed
-	// +optional
-	Error string `json:"error,omitempty"`
-
-	// Conditions represent the latest available observations of restore state
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// Amount of data restored in bytes
-	// +optional
-	RestoredSize int64 `json:"restoredSize,omitempty"`
+	Job JobReference `json:"job,omitempty"`
 
 	// Duration of the restore operation
 	// +optional
 	Duration *metav1.Duration `json:"duration,omitempty"`
+
+	// Time when the backup was created in the repository
+	// +optional
+	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Backup",type="string",JSONPath=".spec.backupName"
-//+kubebuilder:printcolumn:name="Target PVC",type="string",JSONPath=".spec.targetPVC"
+//+kubebuilder:printcolumn:name="Backup",type="string",JSONPath=".spec.name"
+//+kubebuilder:printcolumn:name="Target PVC",type="string",JSONPath=".spec.targetPVC.name"
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+//+kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
 //+kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
@@ -105,6 +85,15 @@ type ResticRestore struct {
 
 	Spec   ResticRestoreSpec   `json:"spec,omitempty"`
 	Status ResticRestoreStatus `json:"status,omitempty"`
+}
+
+// GetLogValues returns key-value pairs for structured logging.
+func (r *ResticRestore) GetLogValues() []interface{} {
+	return []interface{}{
+		"restore", r.Name,
+		"namespace", r.Namespace,
+		"phase", r.Status.Phase,
+	}
 }
 
 //+kubebuilder:object:root=true

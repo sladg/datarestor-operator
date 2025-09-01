@@ -19,36 +19,25 @@ package controller
 import (
 	"context"
 
-	"github.com/robfig/cron/v3"
-	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
-	"github.com/sladg/autorestore-backup-operator/internal/constants"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
-	"github.com/sladg/autorestore-backup-operator/internal/stubs"
+	v1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
+	constants "github.com/sladg/autorestore-backup-operator/internal/constants"
+	utils "github.com/sladg/autorestore-backup-operator/internal/controller/utils"
+	logic "github.com/sladg/autorestore-backup-operator/internal/logic/resticrepository"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// NewResticRepositoryReconciler creates a new ResticRepositoryReconciler
+func NewResticRepositoryReconciler(deps *utils.Dependencies) (*ResticRepositoryReconciler, error) {
+	return &ResticRepositoryReconciler{
+		Deps: deps,
+	}, nil
+}
 
 // ResticRepositoryReconciler reconciles a ResticRepository object
 type ResticRepositoryReconciler struct {
-	client.Client
-	Scheme     *runtime.Scheme
-	Config     *rest.Config
-	cronParser cron.Parser
-}
-
-// NewResticRepositoryReconciler creates a new ResticRepositoryReconciler
-func NewResticRepositoryReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config) *ResticRepositoryReconciler {
-	return &ResticRepositoryReconciler{
-		Client:     client,
-		Scheme:     scheme,
-		Config:     config,
-		cronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
-	}
+	Deps *utils.Dependencies
 }
 
 // +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticrepositories,verbs=get;list;watch;create;update;patch;delete
@@ -61,67 +50,68 @@ func NewResticRepositoryReconciler(client client.Client, scheme *runtime.Scheme,
 
 // Reconcile handles ResticRepository initialization and maintenance
 func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("repository", req.Name)
-	logger.Info("reconcile")
+	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
 
 	// Fetch the ResticRepository instance
-	repository := &backupv1alpha1.ResticRepository{}
-	if err := r.Get(ctx, req.NamespacedName, repository); err != nil {
+	repository := &v1.ResticRepository{}
+	if err := r.Deps.Client.Get(ctx, req.NamespacedName, repository); err != nil {
 		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			log.Info("ResticRepository resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "get repository")
+		// Error reading the object - requeue the request.
+		log.Errorw("Failed to get ResticRepository", "error", err)
 		return ctrl.Result{}, err
 	}
 
 	// Handle deletion
 	if repository.DeletionTimestamp != nil {
-		return stubs.HandleRepoDeletion(ctx, r.Client, repository)
+		return logic.HandleRepoDeletion(ctx, r.Deps, repository)
 	}
 
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(repository, constants.ResticRepositoryFinalizer) {
 		controllerutil.AddFinalizer(repository, constants.ResticRepositoryFinalizer)
-		if err := r.Update(ctx, repository); err != nil {
-			logger.Error(err, "add finalizer")
+		if err := r.Deps.Client.Update(ctx, repository); err != nil {
+			log.Errorw("add finalizer failed", "error", err)
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Handle repository lifecycle based on current phase
+	// Use a pipeline to handle different phases
 	return utils.ProcessSteps(
 		utils.Step{
-			Condition: func() bool { return repository.Status.Phase == "" || repository.Status.Phase == "Unknown" },
+			Condition: func() bool { return repository.Status.Phase == "" },
 			Action: func() (ctrl.Result, error) {
-				return stubs.HandleRepoInitialization(ctx, r.Client, r.Scheme, repository)
+				return logic.HandleRepoInitialization(ctx, r.Deps, repository)
 			},
 		},
 		utils.Step{
-			Condition: func() bool { return repository.Status.Phase == "Initializing" },
+			Condition: func() bool { return repository.Status.Phase == v1.PhasePending },
 			Action: func() (ctrl.Result, error) {
-				return stubs.HandleRepoInitializationStatus(ctx, r.Client, r.Scheme, repository)
+				return logic.HandleRepoInitializationStatus(ctx, r.Deps, repository)
 			},
 		},
 		utils.Step{
-			Condition: func() bool { return repository.Status.Phase == "Ready" },
+			Condition: func() bool { return repository.Status.Phase == v1.PhaseCompleted },
 			Action: func() (ctrl.Result, error) {
-				return stubs.HandleRepoMaintenance(ctx, r.Client, r.Scheme, repository, r.cronParser)
+				return logic.HandleRepoMaintenance(ctx, r.Deps, repository)
 			},
 		},
 		utils.Step{
-			Condition: func() bool { return repository.Status.Phase == "Failed" },
+			Condition: func() bool { return repository.Status.Phase == v1.PhaseFailed },
 			Action: func() (ctrl.Result, error) {
-				return stubs.HandleRepoFailed(ctx, r.Client, r.Scheme, repository)
+				return logic.HandleRepoFailed(ctx, r.Deps, repository)
 			},
 		},
 		utils.Step{
 			Condition: func() bool { return true }, // Default case
 			Action: func() (ctrl.Result, error) {
-				utils.LoggerFrom(ctx, "restic-repository").
-					WithValues("name", req.Name, "namespace", req.Namespace).
-					WithValues("phase", repository.Status.Phase).Debug("Unknown phase")
-				return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+				log.Info("unknown phase; initialize", "phase", repository.Status.Phase)
+				return logic.HandleRepoInitialization(ctx, r.Deps, repository)
 			},
 		},
 	)
@@ -130,6 +120,6 @@ func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 // SetupWithManager sets up the controller with the Manager
 func (r *ResticRepositoryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&backupv1alpha1.ResticRepository{}).
+		For(&v1.ResticRepository{}).
 		Complete(r)
 }

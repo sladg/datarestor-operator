@@ -19,94 +19,97 @@ package controller
 import (
 	"context"
 
-	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
+	v1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
 	"github.com/sladg/autorestore-backup-operator/internal/constants"
 	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
-	"github.com/sladg/autorestore-backup-operator/internal/stubs"
+	logic "github.com/sladg/autorestore-backup-operator/internal/logic/resticrestore"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// ResticRestoreReconciler reconciles a ResticRestore object
-type ResticRestoreReconciler struct {
-	client.Client
-	Scheme *runtime.Scheme
-	Config *rest.Config
+// NewResticRestoreReconciler creates a new ResticRestoreReconciler
+func NewResticRestoreReconciler(deps *utils.Dependencies) *ResticRestoreReconciler {
+	return &ResticRestoreReconciler{
+		Deps: deps,
+	}
 }
 
-//+kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticrestores,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticrestores/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticrestores/finalizers,verbs=update
-//+kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticbackups,verbs=get;list;watch
-//+kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticrepositories,verbs=get;list;watch
+// ResticRestoreReconciler reconciles a ResticRestore object
+type ResticRestoreReconciler struct {
+	Deps *utils.Dependencies
+}
+
+//+kubebuilder:rbac:groups=backup.autorestore.com,resources=resticrestores,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=backup.autorestore.com,resources=resticrestores/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=backup.autorestore.com,resources=resticrestores/finalizers,verbs=update
+//+kubebuilder:rbac:groups=backup.autorestore.com,resources=resticbackups,verbs=get;list;watch
+//+kubebuilder:rbac:groups=backup.autorestore.com,resources=resticrepositories,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 //+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;patch;update
+//+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;patch;update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ResticRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := utils.LoggerFrom(ctx, "restore").
-		WithValues("resticrestore", req.NamespacedName)
+	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
 
 	// Fetch the ResticRestore instance
-	resticRestore := &backupv1alpha1.ResticRestore{}
-	if err := r.Get(ctx, req.NamespacedName, resticRestore); err != nil {
+	resticRestore := &v1.ResticRestore{}
+	if err := r.Deps.Client.Get(ctx, req.NamespacedName, resticRestore); err != nil {
 		if errors.IsNotFound(err) {
-			logger.Debug("ResticRestore resource not found, assuming it was deleted")
+			log.Info("ResticRestore resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		logger.Failed("fetch ResticRestore", err)
+		log.Errorw("Failed to get ResticRestore", "error", err)
 		return ctrl.Result{}, err
 	}
 
-	logger = logger.WithValues("restore", resticRestore.Name, "phase", resticRestore.Status.Phase)
-
 	// Handle deletion
 	if resticRestore.DeletionTimestamp != nil {
-		logger.Starting("finalizer processing")
-		return stubs.HandleResticRestoreDeletion(ctx, r.Client, r.Scheme, resticRestore)
+		return logic.HandleResticRestoreDeletion(ctx, r.Deps, resticRestore)
 	}
 
 	// Add finalizer if missing
 	if !controllerutil.ContainsFinalizer(resticRestore, constants.ResticRestoreFinalizer) {
-		logger.Debug("Adding finalizer")
+		log.Debug("Adding finalizer")
 		controllerutil.AddFinalizer(resticRestore, constants.ResticRestoreFinalizer)
-		return ctrl.Result{}, r.Update(ctx, resticRestore)
+		return ctrl.Result{}, r.Deps.Client.Update(ctx, resticRestore)
 	}
 
-	// Handle different phases
+	// Use a pipeline to handle different phases
 	return utils.ProcessSteps(
 		utils.Step{
-			Condition: func() bool { return resticRestore.Status.Phase == "" || resticRestore.Status.Phase == "Pending" },
+			Condition: func() bool {
+				return resticRestore.Status.Phase == "" || resticRestore.Status.Phase == v1.PhasePending
+			},
 			Action: func() (ctrl.Result, error) {
-				return stubs.HandleRestorePending(ctx, r.Client, r.Scheme, resticRestore)
+				return logic.HandleRestorePending(ctx, r.Deps, resticRestore)
 			},
 		},
 		utils.Step{
-			Condition: func() bool { return resticRestore.Status.Phase == "Running" },
+			Condition: func() bool { return resticRestore.Status.Phase == v1.PhaseRunning },
 			Action: func() (ctrl.Result, error) {
-				return stubs.HandleRestoreRunning(ctx, r.Client, r.Scheme, resticRestore)
+				return logic.HandleRestoreRunning(ctx, r.Deps, resticRestore)
 			},
 		},
 		utils.Step{
 			Condition: func() bool {
-				return resticRestore.Status.Phase == "Completed" || resticRestore.Status.Phase == "Failed"
+				return resticRestore.Status.Phase == v1.PhaseCompleted || resticRestore.Status.Phase == v1.PhaseFailed
 			},
 			Action: func() (ctrl.Result, error) {
+				// Terminal states, do nothing.
 				return ctrl.Result{}, nil
 			},
 		},
 		utils.Step{
 			Condition: func() bool { return true }, // Default case
 			Action: func() (ctrl.Result, error) {
-				logger.WithValues("unknownPhase", resticRestore.Status.Phase).Info("Unknown phase, treating as pending")
-				return stubs.HandleRestorePending(ctx, r.Client, r.Scheme, resticRestore)
+				log.Infow("Unknown phase, treating as pending", "unknownPhase", resticRestore.Status.Phase)
+				return logic.HandleRestorePending(ctx, r.Deps, resticRestore)
 			},
 		},
 	)
@@ -115,15 +118,6 @@ func (r *ResticRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 // SetupWithManager sets up the controller with the Manager.
 func (r *ResticRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&backupv1alpha1.ResticRestore{}).
+		For(&v1.ResticRestore{}).
 		Complete(r)
-}
-
-// NewResticRestoreReconciler creates a new ResticRestoreReconciler
-func NewResticRestoreReconciler(client client.Client, scheme *runtime.Scheme, config *rest.Config) *ResticRestoreReconciler {
-	return &ResticRestoreReconciler{
-		Client: client,
-		Scheme: scheme,
-		Config: config,
-	}
 }

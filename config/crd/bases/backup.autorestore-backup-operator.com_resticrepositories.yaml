@@ -15,21 +15,15 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.repository
-      name: Repository
-      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.initialized
-      name: Initialized
-      type: boolean
-    - jsonPath: .status.stats.totalSnapshots
-      name: Snapshots
-      type: integer
-    - jsonPath: .status.stats.totalSize
-      name: Size
+    - jsonPath: .spec.backupConfig.name
+      name: BackupConfig
       type: string
+    - jsonPath: .status.initializedTime
+      name: Initialized
+      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -56,8 +50,23 @@ spec:
           metadata:
             type: object
           spec:
-            description: ResticRepositorySpec defines the desired state of ResticRepository
             properties:
+              args:
+                description: |-
+                  Arguments to pass directly to the restic command.
+                  Use with caution, as invalid flags can break operations.
+                items:
+                  type: string
+                type: array
+              backupConfig:
+                description: Reference to the BackupConfig that owns this repository
+                properties:
+                  name:
+                    description: Name of the ResticRepository
+                    type: string
+                required:
+                - name
+                type: object
               env:
                 description: Environment variables for authentication (e.g., AWS_ACCESS_KEY_ID,
                   AWS_SECRET_ACCESS_KEY)
@@ -177,64 +186,24 @@ spec:
                   - name
                   type: object
                 type: array
-              flags:
-                description: Additional restic flags for repository operations
-                items:
-                  type: string
-                type: array
               image:
                 default: restic/restic:latest
                 description: Image for restic operations
+                pattern: ^[^:]+:[^:]+$
                 type: string
-              maintenanceSchedule:
-                description: Repository maintenance schedule (for check, prune operations)
-                properties:
-                  checkCron:
-                    default: 0 4 * * 0
-                    description: Cron expression for repository check schedule (e.g.,
-                      "0 4 * * 0" for weekly at 4 AM)
-                    type: string
-                  enabled:
-                    default: true
-                    description: Whether maintenance is enabled
-                    type: boolean
-                  pruneCron:
-                    default: 0 5 * * 0
-                    description: Cron expression for repository prune schedule (e.g.,
-                      "0 5 * * 0" for weekly at 5 AM)
-                    type: string
-                  verificationCron:
-                    default: 0 1 * * *
-                    description: Cron expression for snapshot verification schedule
-                      (e.g., "0 1 * * *" for daily at 1 AM)
-                    type: string
-                type: object
-              password:
-                description: Password for restic repository
-                type: string
-              repository:
-                description: Restic repository URL (e.g., s3:s3.amazonaws.com/bucket/path)
+              target:
+                description: Restic repository target (e.g., s3:s3.amazonaws.com/bucket/path)
                 type: string
             required:
-            - repository
+            - target
             type: object
           status:
             description: ResticRepositoryStatus defines the observed state of ResticRepository
             properties:
-              checkJobRef:
-                description: Reference to the current repository check job (if any)
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
+              completionTime:
+                description: Time when the operation completed
+                format: date-time
+                type: string
               conditions:
                 description: Conditions represent the latest available observations
                 items:
@@ -293,66 +262,62 @@ spec:
                   type: object
                 type: array
               error:
-                description: Error message if repository is in failed state
+                description: Error message if operation failed
                 type: string
               initializedTime:
                 description: Time when the repository was last initialized
                 format: date-time
                 type: string
-              lastChecked:
-                description: Last time repository connectivity was verified
-                format: date-time
-                type: string
-              lastSnapshotVerification:
-                description: Last time snapshot verification was performed
-                format: date-time
-                type: string
-              nextMaintenance:
-                description: Next scheduled maintenance time
-                format: date-time
-                type: string
-              phase:
-                description: Repository initialization status
-                enum:
-                - Unknown
-                - Initializing
-                - Ready
-                - Failed
-                type: string
-              snapshotVerificationCount:
-                description: Number of snapshots successfully verified in last verification
-                format: int64
-                type: integer
-              snapshotVerificationError:
-                description: Error message from snapshot verification (if any)
-                type: string
-              snapshotVerificationErrors:
-                description: Number of snapshot verification errors in last verification
-                format: int64
-                type: integer
-              stats:
-                description: Repository statistics
+              job:
+                description: Reference to the current repository check job
                 properties:
-                  lastUpdated:
-                    description: Last time stats were updated
-                    format: date-time
+                  jobRef:
+                    description: Reference to the Kubernetes Job
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+              maintenanceSchedule:
+                description: Next maintenance time
+                properties:
+                  checkSchedule:
+                    default: 0 4 * * 0
+                    description: Cron expression for repository check schedule (e.g.,
+                      "0 4 * * 0" for weekly at 4 AM)
                     type: string
-                  totalBlobs:
-                    description: Number of data blobs
-                    format: int32
-                    type: integer
-                  totalSize:
-                    description: Total size of repository in bytes
-                    format: int64
-                    type: integer
-                  totalSnapshots:
-                    description: Total number of snapshots in repository
-                    format: int32
-                    type: integer
-                  version:
-                    description: Repository version
+                  enabled:
+                    default: true
+                    description: Whether maintenance is enabled
+                    type: boolean
+                  pruneSchedule:
+                    default: 0 5 * * 0
+                    description: Cron expression for repository prune schedule (e.g.,
+                      "0 5 * * 0" for weekly at 5 AM)
+                    type: string
+                  verificationSchedule:
+                    default: 0 1 * * *
+                    description: Cron expression for snapshot verification schedule
+                      (e.g., "0 1 * * *" for daily at 1 AM)
                     type: string
                 type: object
+              phase:
+                description: Current phase of the operation
+                type: string
+              startTime:
+                description: Time when the operation started
+                format: date-time
+                type: string
+            required:
+            - maintenanceSchedule
             type: object
         type: object
     served: true
