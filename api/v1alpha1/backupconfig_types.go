@@ -32,7 +32,8 @@ type BackupTarget struct {
 
 	// Reference to the ResticRepository to use for backups
 	// +required
-	Repository ResticRepositoryRef `json:"repository"`
+	// +kubebuilder:object:generate=false
+	Repository ResticRepository `json:"repository"`
 
 	// Cron schedule for retention checks (e.g., "0 3 * * *" for daily at 3 AM)
 	// If not specified, defaults to "0 3 * * *"
@@ -51,7 +52,7 @@ type BackupTarget struct {
 type Selector struct {
 	// Label selector for PVCs.
 	// +optional
-	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
+	LabelSelector metav1.LabelSelector `json:"labelSelector,omitempty"`
 
 	// Annotation selector for PVCs. A PVC is selected if it has all the annotations in this map.
 	// +optional
@@ -73,10 +74,6 @@ type Selector struct {
 	// StopPods specifies whether to scale down workloads using the PVCs matched by this selector.
 	// +optional
 	StopPods bool `json:"stopPods,omitempty"`
-
-	// Wait for pod health before backup
-	// +optional
-	WaitForHealthy bool `json:"waitForHealthy,omitempty"`
 }
 
 // BackupConfigSpec defines the desired state of BackupConfig
@@ -109,7 +106,8 @@ type BackupConfigStatus struct {
 
 	// List of repositories managed by this config
 	// +optional
-	Repositories []ResticRepositoryRef `json:"repositories,omitempty"`
+	// +kubebuilder:object:generate=false
+	Repositories []ResticRepository `json:"repositories,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -47,7 +48,7 @@ type RepositoryMaintenanceSchedule struct {
 type ResticRepositorySpec struct {
 	// Reference to the BackupConfig that owns this repository
 	// +optional
-	BackupConfig *ResticRepositoryRef `json:"backupConfig,omitempty"`
+	BackupConfig *BackupConfig `json:"backupConfig,omitempty"`
 
 	// Restic repository target (e.g., s3:s3.amazonaws.com/bucket/path)
 	// +required
@@ -80,7 +81,7 @@ type ResticRepositoryStatus struct {
 
 	// Reference to the current repository check job
 	// +optional
-	Job JobReference `json:"job,omitempty"`
+	Job *batchv1.Job `json:"job,omitempty"`
 
 	// Next maintenance time
 	// +required

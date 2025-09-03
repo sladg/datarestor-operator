@@ -18,24 +18,22 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	constants "github.com/sladg/datarestor-operator/internal/constants"
 	utils "github.com/sladg/datarestor-operator/internal/controller/utils"
-	logic "github.com/sladg/datarestor-operator/internal/logic/resticrepository"
+	"github.com/sladg/datarestor-operator/internal/logic/resticrepository"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-// NewResticRepositoryReconciler creates a new ResticRepositoryReconciler
 func NewResticRepositoryReconciler(deps *utils.Dependencies) (*ResticRepositoryReconciler, error) {
 	return &ResticRepositoryReconciler{
 		Deps: deps,
 	}, nil
 }
 
-// ResticRepositoryReconciler reconciles a ResticRepository object
 type ResticRepositoryReconciler struct {
 	Deps *utils.Dependencies
 }
@@ -48,58 +46,64 @@ type ResticRepositoryReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 
-// Reconcile handles ResticRepository initialization and maintenance
 func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
 
 	// Fetch the ResticRepository instance
-	repository, err := utils.GetResource[v1.ResticRepository](ctx, r.Deps.Client, req.Namespace, req.Name, log)
-	if err != nil {
+	resticRepo := &v1.ResticRepository{}
+	if err := r.Deps.Get(ctx, req.NamespacedName, resticRepo); err != nil {
 		if errors.IsNotFound(err) {
-			// Request object not found, could have been deleted after reconcile request.
-			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
-			// Return and don't requeue
-			log.Info("ResticRepository resource not found. Ignoring since object must be deleted")
+			log.Info("ResticRepository resource not found. Ignoring...")
 			return ctrl.Result{}, nil
 		}
-		// Error reading the object - requeue the request.
+		log.Errorw("Failed to get ResticRepository", "error", err)
 		return ctrl.Result{}, err
 	}
 
 	// Handle deletion
-	if repository.DeletionTimestamp != nil {
-		if repository.Status.Phase != v1.PhaseDeletion {
-			return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseDeletion, metav1.Now(), "")
-		}
-	} else {
-		// Add finalizer if not present
-		if err := utils.AddFinalizer(ctx, r.Deps, repository, constants.ResticRepositoryFinalizer); err != nil {
-			log.Errorw("add finalizer failed", "error", err)
+	if resticRepo.DeletionTimestamp != nil {
+		resticRepo.Status.Phase = v1.PhaseDeletion
+		if err := r.Deps.Status().Update(ctx, resticRepo); err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 	}
 
-	// Main reconciliation logic based on phase
-	switch repository.Status.Phase {
-	case v1.PhaseUnknown:
-		return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhasePending, metav1.Now(), "")
-	case v1.PhasePending:
-		return logic.HandleRepoPending(ctx, r.Deps, repository)
-	case v1.PhaseRunning:
-		return logic.HandleRepoRunning(ctx, r.Deps, repository)
-	case v1.PhaseCompleted:
-		return logic.HandleRepoMaintenance(ctx, r.Deps, repository)
-	case v1.PhaseFailed:
-		return logic.HandleRepoFailed(ctx, r.Deps, repository)
-	case v1.PhaseDeletion:
-		return logic.HandleRepositoryDeletion(ctx, r.Deps, repository)
-	default:
-		log.Errorw("Unknown phase", "phase", repository.Status.Phase)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-	}
+	p := resticRepo.Status.Phase
+
+	return utils.ProcessSteps(
+		utils.Step{
+			Condition: func() bool {
+				return p == v1.PhaseUnknown || p == v1.PhasePending
+			},
+			Action: func() (ctrl.Result, error) { return resticrepository.HandleRepoPending(ctx, r.Deps, resticRepo) },
+		},
+		utils.Step{
+			Condition: func() bool { return p == v1.PhaseRunning },
+			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoRunning(ctx, r.Deps, resticRepo) },
+		},
+		utils.Step{
+			Condition: func() bool { return p == v1.PhaseFailed },
+			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoFailed(ctx, r.Deps, resticRepo) },
+		},
+		utils.Step{
+			Condition: func() bool { return p == v1.PhaseCompleted },
+			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoCompleted(ctx, r.Deps, resticRepo) },
+		},
+		utils.Step{
+			Condition: func() bool { return p == v1.PhaseDeletion },
+			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoDeletion(ctx, r.Deps, resticRepo) },
+		},
+		utils.Step{
+			Condition: func() bool { return true }, // Default case
+			Action: func() (ctrl.Result, error) {
+				r.Deps.Logger.Infow("Unknown or unhandled phase", "phase", p)
+				return ctrl.Result{}, fmt.Errorf("unknown or unhandled phase: %s", p)
+			},
+		},
+	)
 }
 
-// SetupWithManager sets up the controller with the Manager
 func (r *ResticRepositoryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.ResticRepository{}).

@@ -4,6 +4,9 @@ metadata:
   name: backupconfig-restic-example
   namespace: default
 spec:
+  # Auto-restore for new PVCs
+  autoRestore: true
+
   # Backup targets using Restic
   backupTargets:
     # S3-compatible storage via Restic
@@ -13,20 +16,11 @@ spec:
         repository: "s3:s3.amazonaws.com/my-backup-bucket"
         env:
           - name: RESTIC_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: restic-secret
-                key: password
+            value: "your-encryption-password"
           - name: AWS_ACCESS_KEY_ID
-            valueFrom:
-              secretKeyRef:
-                name: aws-credentials
-                key: access-key-id
+            value: "minio-access-key"
           - name: AWS_SECRET_ACCESS_KEY
-            valueFrom:
-              secretKeyRef:
-                name: aws-credentials
-                key: secret-access-key
+            value: "minio-secret-key"
           - name: AWS_DEFAULT_REGION
             value: "eu-central-1"
         tags:
@@ -42,42 +36,15 @@ spec:
         maxAge: "2160h"
 
   # PVC selection criteria
-  pvcSelector:
-    labelSelector:
-      matchLabels:
-        app: database
-        backup: "true"
-    namespaces:
-      - "production"
-      - "staging"
-    names:
-      - "postgres-data"
-      - "mysql-data"
-
-  # Backup schedule
-  schedule:
-    cron: "0 2 * * *" # Daily at 2 AM
-    waitForHealthy: true
-    stopPods: false
-
-  # Auto-restore for new PVCs
-  autoRestore: true
-
-  # Retention policy (applied to all targets)
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: restic-secret
-  namespace: default
-stringData:
-  password: your-encryption-password
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: aws-credentials
-  namespace: default
-stringData:
-  access-key-id: your-aws-access-key-id
-  secret-access-key: your-aws-secret-access-key
+  selectors:
+    - stopPods: true
+      labelSelector:
+        matchLabels:
+          app: database
+          backup: "true"
+      namespaces:
+        - "production"
+        - "staging"
+      names:
+        - "postgres-data"
+        - "mysql-data"

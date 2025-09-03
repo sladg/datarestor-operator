@@ -19,7 +19,7 @@ func AddFinalizer(ctx context.Context, deps *Dependencies, obj client.Object, fi
 		return nil
 	}
 	controllerutil.AddFinalizer(obj, finalizer)
-	if err := deps.Client.Update(ctx, obj); err != nil {
+	if err := deps.Update(ctx, obj); err != nil {
 		return fmt.Errorf("failed to add finalizer: %w", err)
 	}
 	return nil
@@ -32,7 +32,7 @@ func RemoveFinalizer(ctx context.Context, deps *Dependencies, obj client.Object,
 		return nil
 	}
 	controllerutil.RemoveFinalizer(obj, finalizer)
-	if err := deps.Client.Update(ctx, obj); err != nil {
+	if err := deps.Update(ctx, obj); err != nil {
 		return fmt.Errorf("failed to remove finalizer: %w", err)
 	}
 

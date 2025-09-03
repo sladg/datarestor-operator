@@ -5,6 +5,7 @@ import (
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
+
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -12,11 +13,11 @@ import (
 )
 
 // pvcToRequests converts a PVC to a list of reconcile requests
-func pvcToRequests(ctx context.Context, c client.Client, pvc *corev1.PersistentVolumeClaim) []reconcile.Request {
+func pvcToRequests(ctx context.Context, deps *utils.Dependencies, pvc *corev1.PersistentVolumeClaim) []reconcile.Request {
 	// List all BackupConfigs in the namespace
 	backupConfigList := &v1.BackupConfigList{}
 	selector := utils.SelectorInNamespace(pvc.Namespace)
-	backupConfigs, err := utils.FindMatchingResources[*v1.BackupConfig](ctx, &utils.Dependencies{Client: c}, []v1.Selector{selector}, backupConfigList)
+	backupConfigs, err := utils.FindMatchingResources[*v1.BackupConfig](ctx, deps, []v1.Selector{selector}, backupConfigList)
 	if err != nil {
 		return nil
 	}
@@ -38,18 +39,18 @@ func pvcToRequests(ctx context.Context, c client.Client, pvc *corev1.PersistentV
 }
 
 // FindObjectsForPVC returns BackupConfig reconcile requests for a PVC
-func FindObjectsForPVC(c client.Client) handler.MapFunc {
+func FindObjectsForPVC(deps *utils.Dependencies) handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		pvc, ok := obj.(*corev1.PersistentVolumeClaim)
 		if !ok {
 			return nil
 		}
-		return pvcToRequests(ctx, c, pvc)
+		return pvcToRequests(ctx, deps, pvc)
 	}
 }
 
 // FindObjectsForPod returns BackupConfig reconcile requests for a Pod
-func FindObjectsForPod(c client.Client) handler.MapFunc {
+func FindObjectsForPod(deps *utils.Dependencies) handler.MapFunc {
 	return func(ctx context.Context, obj client.Object) []reconcile.Request {
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
@@ -73,7 +74,7 @@ func FindObjectsForPod(c client.Client) handler.MapFunc {
 		var requests []reconcile.Request
 		for _, pvcName := range pvcNames {
 			pvc := &corev1.PersistentVolumeClaim{}
-			if err := c.Get(ctx, client.ObjectKey{
+			if err := deps.Get(ctx, client.ObjectKey{
 				Name:      pvcName,
 				Namespace: pod.Namespace,
 			}, pvc); err != nil {
@@ -81,7 +82,7 @@ func FindObjectsForPod(c client.Client) handler.MapFunc {
 			}
 
 			// Find BackupConfigs for this PVC
-			pvcRequests := pvcToRequests(ctx, c, pvc)
+			pvcRequests := pvcToRequests(ctx, deps, pvc)
 			requests = append(requests, pvcRequests...)
 		}
 

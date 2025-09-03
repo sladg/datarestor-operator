@@ -17,8 +17,7 @@ type workloadInfo struct {
 	Replicas int32  `json:"replicas"`
 }
 
-// StoreOriginalReplicasInAnnotation annotates the owner object with the original replica counts of the workloads.
-func StoreOriginalReplicasInAnnotation(ctx context.Context, deps *Dependencies, owner client.Object, workloads []client.Object) error {
+func GetOriginalReplicasInfo(ctx context.Context, deps *Dependencies, workloads []client.Object) (map[string]workloadInfo, error) {
 	originalReplicas := make(map[string]workloadInfo)
 	for _, workload := range workloads {
 		switch w := workload.(type) {
@@ -29,6 +28,10 @@ func StoreOriginalReplicasInAnnotation(ctx context.Context, deps *Dependencies, 
 		}
 	}
 
+	return originalReplicas, nil
+}
+
+func SetOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, owner client.Object, originalReplicas map[string]workloadInfo) error {
 	jsonData, err := json.Marshal(originalReplicas)
 	if err != nil {
 		return fmt.Errorf("failed to marshal original replica counts: %w", err)
@@ -38,13 +41,13 @@ func StoreOriginalReplicasInAnnotation(ctx context.Context, deps *Dependencies, 
 	if annotations == nil {
 		annotations = make(map[string]string)
 	}
+
 	annotations[constants.AnnotationOriginalReplicas] = string(jsonData)
 	owner.SetAnnotations(annotations)
 
-	return deps.Client.Update(ctx, owner)
+	return deps.Update(ctx, owner)
 }
 
-// LoadOriginalReplicasFromAnnotation loads the original replica counts from the owner's annotation.
 func LoadOriginalReplicasFromAnnotation(owner client.Object) (map[string]workloadInfo, error) {
 	annotations := owner.GetAnnotations()
 	jsonData, ok := annotations[constants.AnnotationOriginalReplicas]
@@ -68,7 +71,7 @@ func RemoveOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, o
 
 	delete(annotations, constants.AnnotationOriginalReplicas)
 	owner.SetAnnotations(annotations)
-	return deps.Client.Update(ctx, owner)
+	return deps.Update(ctx, owner)
 }
 
 // AnnotateResources applies a set of annotations to a list of resources.
@@ -97,7 +100,7 @@ func AnnotateResources(ctx context.Context, deps *Dependencies, resources []clie
 
 		if modified {
 			resource.SetAnnotations(currentAnnotations)
-			if err := deps.Client.Update(ctx, resource); err != nil {
+			if err := deps.Update(ctx, resource); err != nil {
 				return fmt.Errorf("failed to update annotations for %s %s: %w", resource.GetObjectKind().GroupVersionKind().Kind, resource.GetName(), err)
 			}
 		}

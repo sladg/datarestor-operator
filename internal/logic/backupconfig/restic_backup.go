@@ -13,7 +13,7 @@ import (
 )
 
 // createResticBackup creates a ResticBackup resource.
-func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, backupName string, target v1.BackupTarget, repo *v1.ResticRepository) error {
+func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, backupName string, target v1.BackupTarget, repository *v1.ResticRepository) error {
 	backup := &v1.ResticBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      backupName,
@@ -25,23 +25,24 @@ func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupCon
 			},
 		},
 		Spec: v1.ResticBackupSpec{
-			Name: fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
-			SourcePVC: v1.PersistentVolumeClaimRef{
+			Name:       fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
+			Repository: repository,
+			SourcePVC: corev1.ObjectReference{
 				Name:      pvc.Name,
 				Namespace: pvc.Namespace,
 			},
-			Restic: repo.Spec,
-			Type:   v1.BackupTypeScheduled,
+			Type: v1.BackupTypeScheduled,
 			Args: []string{
 				"--tag", fmt.Sprintf("pvc=%s", pvc.Name),
 				"--tag", fmt.Sprintf("namespace=%s", pvc.Namespace),
 				"--tag", fmt.Sprintf("backup-config=%s", backupConfig.Name),
 				"--tag", "backup-type=scheduled",
 			},
+			SnapshotID: backupName,
 		},
 		Status: v1.ResticBackupStatus{
 			CommonStatus: v1.CommonStatus{
-				Phase: v1.PhasePending,
+				Phase: v1.PhaseUnknown,
 			},
 		},
 	}
@@ -51,5 +52,5 @@ func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupCon
 		return fmt.Errorf("failed to set controller reference: %w", err)
 	}
 
-	return deps.Client.Create(ctx, backup)
+	return deps.Create(ctx, backup)
 }

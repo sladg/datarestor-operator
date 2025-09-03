@@ -1,4 +1,4 @@
-package logic
+package resticrepository
 
 import (
 	"context"
@@ -7,210 +7,184 @@ import (
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
-	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-// HandleRepoPending handles the logic when a ResticRepository is in the Pending phase.
 func HandleRepoPending(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
 	log := deps.Logger.Named("repo-pending")
-	log.Info("Handling pending repository")
+	log.Info("Handling pending repository", "name", repo.Name)
 
-	// 1. Add finalizer
-	if err := utils.AddFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer); err != nil {
-		log.Errorw("Failed to add finalizer", "error", err)
+	if repo.Status.Job == nil {
+		jobSpec := utils.BuildCheckJobSpec(repo)
+		job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec, repo)
+		if err != nil {
+			log.Errorw("Failed to create check job", "error", err)
+			repo.Status.Phase = v1.PhaseFailed
+			repo.Status.Error = err.Error()
+			return ctrl.Result{}, err
+		}
+
+		repo.Status.Job = job
+
+		if err := deps.Status().Update(ctx, repo); err != nil {
+			log.Errorw("Failed to update repository status", "error", err)
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	}
+
+	// Check if the job is finished
+	finished, succeeded := utils.IsJobFinished(repo.Status.Job)
+	if !finished {
+		log.Debug("Check job still running")
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	}
+
+	if succeeded {
+		log.Info("Repository exists, marking as completed")
+		repo.Status.Phase = v1.PhaseCompleted
+	} else {
+		log.Info("Repository check failed, assuming not initialized")
+		repo.Status.Phase = v1.PhaseRunning
+
+		if err := deps.Delete(ctx, repo.Status.Job); err != nil {
+			log.Errorw("Failed to clean up check repository job", "error", err)
+		}
+
+		repo.Status.Job = nil
+	}
+
+	if err := deps.Status().Update(ctx, repo); err != nil {
+		log.Errorw("Failed to update repository status", "error", err)
 		return ctrl.Result{}, err
 	}
-
-	// 2. Create the initialization job
-	job, err := CreateInitJob(ctx, deps, repo)
-	if err != nil {
-		log.Errorw("Failed to create init job", "error", err)
-		return ctrl.Result{}, err
-	}
-
-	// 3. Update status to Running
-	return UpdateRepoStatus(ctx, deps, repo, v1.PhaseRunning, metav1.Now(), job.Name)
-}
-
-// CreateInitJob creates a new initialization job for the repository
-func CreateInitJob(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (*batchv1.Job, error) {
-	log := deps.Logger.Named("repo-init")
-
-	jobSpec, err := utils.BuildInitJobSpec(repo)
-	if err != nil {
-		return nil, err
-	}
-
-	job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec, repo)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create init job: %w", err)
-	}
-
-	log.Infow("Init job created", "jobName", job.Name)
-	return job, nil
-}
-
-// FindActiveJobForRepo finds the currently active job for a ResticRepository.
-func FindActiveJobForRepo(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (*batchv1.Job, error) {
-	selector := v1.Selector{
-		Namespaces: []string{repo.Namespace},
-		LabelSelector: &metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				"app.kubernetes.io/instance":   repo.Name,
-				"app.kubernetes.io/managed-by": v1.OperatorDomain,
-			},
-		},
-	}
-	jobList := &batchv1.JobList{}
-	jobs, err := utils.FindMatchingResources[*batchv1.Job](ctx, deps, []v1.Selector{selector}, jobList)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find job via selector: %w", err)
-	}
-
-	for _, job := range jobs {
-		if job.Status.CompletionTime == nil {
-			return job, nil // Found the active job
-		}
-	}
-
-	return nil, nil // No active job found
-}
-
-// HandleRepoMaintenance handles scheduled maintenance (check, prune) for a ready repository.
-func HandleRepoMaintenance(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-maintenance")
-	log.Debug("Handling repository maintenance")
-	// This is a placeholder for future maintenance logic (e.g., cron-based check/prune jobs)
-	return ctrl.Result{RequeueAfter: constants.RepositoryRequeueInterval}, nil // Requeue periodically to check for maintenance
-}
-
-// HandleRepoFailed handles a repository in the Failed phase.
-func HandleRepoFailed(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-failed")
-	log.Info("Handling failed repository")
-
-	// Get the failed job to extract logs
-	job, err := FindActiveJobForRepo(ctx, deps, repo)
-	if err == nil && job != nil { // Job exists
-		// Attempt to get logs from the failed pod for better error reporting
-		podLogs, logErr := utils.GetJobLogs(ctx, deps, job)
-		if logErr != nil {
-			log.Errorw("Failed to get logs from failed init job pod", "error", logErr)
-		}
-		log.Errorw("Init job failed", "reason", job.Status.Conditions[0].Reason, "message", job.Status.Conditions[0].Message, "logs", podLogs)
-		repo.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", job.Status.Conditions[0].Reason, job.Status.Conditions[0].Message, podLogs)
-
-		// Update status with the log message
-		if err := deps.Client.Status().Update(ctx, repo); err != nil {
-			log.Errorw("Failed to update repo status with failure logs", "error", err)
-		}
-
-		// Clean up the failed job
-		if err := deps.Client.Delete(ctx, job); err != nil {
-			log.Errorw("Failed to clean up failed init job", "error", err)
-		} else {
-			log.Info("Successfully cleaned up failed init job")
-		}
-	} else if err != nil {
-		log.Errorw("Failed to get failed init job for log retrieval", "error", err)
-	}
-
-	// Terminal state. We might want to requeue after a long interval to allow for manual intervention.
-	return ctrl.Result{RequeueAfter: constants.RepositoryRequeueInterval}, nil
+	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 }
 
 // HandleRepoRunning handles the logic when a ResticRepository is in the Running phase.
+// This function is focused on initializing the repository and monitoring the initialization job.
 func HandleRepoRunning(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
 	log := deps.Logger.Named("repo-running")
 	log.Info("Handling running repository")
 
-	job, err := FindActiveJobForRepo(ctx, deps, repo)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if job == nil {
-		log.Errorw("No init job found for repository, assuming failure")
-		return UpdateRepoStatus(ctx, deps, repo, v1.PhaseFailed, metav1.Now(), "")
+	if repo.Status.Job == nil {
+		jobSpec := utils.BuildInitJobSpec(repo)
+		job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec, repo)
+		if err != nil {
+			log.Errorw("Failed to create init job", "error", err)
+			repo.Status.Phase = v1.PhaseFailed
+			repo.Status.Error = err.Error()
+			return ctrl.Result{}, err
+		}
+
+		repo.Status.Job = job
+
+		if err := deps.Status().Update(ctx, repo); err != nil {
+			log.Errorw("Failed to update repository status", "error", err)
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
-	finished, succeeded := utils.IsJobFinished(job)
+	finished, succeeded := utils.IsJobFinished(repo.Status.Job)
 	if !finished {
 		log.Debug("Init job still running")
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
 	if succeeded {
-		// Verify repository exists
-		err := CheckRepositoryExists(ctx, deps, repo)
-		if err == nil {
-			log.Info("Repository initialized and verified")
-			return UpdateRepoStatus(ctx, deps, repo, v1.PhaseCompleted, metav1.Now(), job.Name)
-		}
-		log.Errorw("Repository check failed after successful init", "error", err)
-		return UpdateRepoStatus(ctx, deps, repo, v1.PhaseFailed, metav1.Now(), job.Name)
+		log.Info("Repository initialization job succeeded")
+		repo.Status.Phase = v1.PhaseCompleted
+	} else {
+		log.Errorw("Repository initialization job failed", "error", repo.Status.Job.Status.Conditions[0].Message)
+		repo.Status.Phase = v1.PhaseFailed
 	}
 
-	// Job failed
-	log.Errorw("Init job failed")
-	return UpdateRepoStatus(ctx, deps, repo, v1.PhaseFailed, metav1.Now(), job.Name)
-}
-
-// CheckRepositoryExists checks if a repository exists by running a check job.
-func CheckRepositoryExists(ctx context.Context, deps *utils.Dependencies, repository *v1.ResticRepository) error {
-	log := deps.Logger.Named("repo-check").With("repository", repository.Name)
-	log.Info("Checking if repository exists")
-
-	// Create restic job to check repository
-	jobSpec := utils.BuildCheckJobSpec(repository)
-	job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec, repository)
-	if err != nil {
-		return fmt.Errorf("failed to create check job: %w", err)
-	}
-
-	// Wait for job completion
-	job, err = utils.GetResource[batchv1.Job](ctx, deps.Client, repository.Namespace, job.Name, log)
-	if err != nil {
-		return fmt.Errorf("failed to get check job: %w", err)
-	}
-
-	// Check job status
-	if job.Status.Failed > 0 {
-		return fmt.Errorf("repository check failed")
-	}
-
-	return nil
-}
-
-// UpdateRepoStatus updates the status of the ResticRepository resource.
-func UpdateRepoStatus(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository, phase v1.Phase, transitionTime metav1.Time, jobName string) (ctrl.Result, error) {
-	repo.Status.Phase = phase
-	if phase != v1.PhaseFailed {
-		repo.Status.Error = ""
-	}
-
-	// Update job reference if jobName is provided
-	if jobName != "" {
-		repo.Status.Job.JobRef = &corev1.LocalObjectReference{Name: jobName}
-	}
-
-	if repo.Status.InitializedTime == nil && (phase == v1.PhaseCompleted || phase == v1.PhaseFailed) {
-		repo.Status.InitializedTime = &transitionTime
-	}
-
-	if err := deps.Client.Status().Update(ctx, repo); err != nil {
+	if err := deps.Status().Update(ctx, repo); err != nil {
+		log.Errorw("Failed to update repository status", "error", err)
 		return ctrl.Result{}, err
 	}
-
 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 }
 
-// RunMaintenance runs maintenance on the repository.
-func RunMaintenance(ctx context.Context, deps *utils.Dependencies, repository *v1.ResticRepository) (ctrl.Result, error) {
-	// TODO: Implement maintenance operations
-	log := deps.Logger.Named("repo-maintenance").With("repository", repository.Name)
-	log.Info("Maintenance operations not yet implemented")
-	return ctrl.Result{RequeueAfter: constants.RepositoryRequeueInterval}, nil
+func HandleRepoCompleted(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
+	log := deps.Logger.Named("repo-completed")
+	log.Info("Handling completed repository")
+
+	if repo.Status.Job == nil {
+		return ctrl.Result{}, nil
+	}
+
+	if err := deps.Delete(ctx, repo.Status.Job); err != nil {
+		log.Errorw("Failed to clean up completed repository job", "error", err)
+	} else {
+		log.Info("Successfully cleaned up completed backup job")
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func HandleRepoFailed(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
+	log := deps.Logger.Named("repo-failed")
+	log.Info("Handling failed repository")
+
+	if repo.Status.Job == nil {
+		return ctrl.Result{}, nil
+	}
+
+	podLogs, _ := utils.GetJobLogs(ctx, deps, repo.Status.Job)
+
+	repo.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", repo.Status.Job.Status.Conditions[0].Reason, repo.Status.Job.Status.Conditions[0].Message, podLogs)
+	log.Errorw("Repository initialization job failed", repo.Status.Error)
+
+	if err := deps.Status().Update(ctx, repo); err != nil {
+		log.Errorw("Failed to update repository status with failure logs", "error", err)
+	}
+
+	if err := deps.Delete(ctx, repo.Status.Job); err != nil {
+		log.Errorw("Failed to clean up failed repository job", "error", err)
+	} else {
+		log.Info("Successfully cleaned up failed repository job")
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func HandleRepoDeletion(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
+	log := deps.Logger.Named("repo-deletion")
+
+	// Check for active backups using this repository
+	backups, err := utils.FindBackupsByRepository(ctx, deps, repo.Namespace, repo.Name)
+	if err != nil {
+		log.Errorw("Failed to list backups", "error", err)
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	}
+
+	for _, backup := range backups {
+		if backup.Status.Phase == v1.PhaseRunning {
+			log.Infow("Repository has active backups", "backup", backup.Name)
+			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+		}
+	}
+
+	// Check for active restores using this repository
+	restores, err := utils.FindRestoresByRepository(ctx, deps, repo.Namespace, repo.Name)
+	if err != nil {
+		log.Errorw("Failed to list restores", "error", err)
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	}
+
+	for _, restore := range restores {
+		if restore.Status.Phase == v1.PhaseRunning {
+			log.Infow("Repository has active restores", "restore", restore.Name)
+			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+		}
+	}
+
+	if err := utils.RemoveFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer); err != nil {
+		log.Errorw("Failed to remove finalizer", "error", err)
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	}
+
+	return ctrl.Result{}, nil
 }

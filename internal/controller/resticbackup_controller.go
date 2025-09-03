@@ -2,15 +2,15 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
-	logic "github.com/sladg/datarestor-operator/internal/logic/resticbackup"
+	"github.com/sladg/datarestor-operator/internal/logic/resticbackup"
 )
 
 // ResticBackupReconciler reconciles a ResticBackup object
@@ -35,8 +35,8 @@ func NewResticBackupReconciler(deps *utils.Dependencies) *ResticBackupReconciler
 func (r *ResticBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
 
-	backup := &v1.ResticBackup{}
-	if err := r.Deps.Client.Get(ctx, req.NamespacedName, backup); err != nil {
+	resticBackup := &v1.ResticBackup{}
+	if err := r.Deps.Get(ctx, req.NamespacedName, resticBackup); err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("ResticBackup resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
@@ -46,43 +46,42 @@ func (r *ResticBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Handle deletion
-	if backup.DeletionTimestamp != nil {
-		return logic.HandleBackupDeletion(ctx, r.Deps, backup)
-	}
-
-	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(backup, constants.ResticBackupFinalizer) {
-		controllerutil.AddFinalizer(backup, constants.ResticBackupFinalizer)
-		if err := r.Deps.Client.Update(ctx, backup); err != nil {
-			log.Errorw("add finalizer failed", "error", err)
+	if resticBackup.DeletionTimestamp != nil {
+		resticBackup.Status.Phase = v1.PhaseDeletion
+		if err := r.Deps.Status().Update(ctx, resticBackup); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 	}
 
-	// Use a pipeline to handle different phases
+	p := resticBackup.Status.Phase
+
 	return utils.ProcessSteps(
 		utils.Step{
-			Condition: func() bool { return backup.Status.Phase == "" || backup.Status.Phase == v1.PhasePending },
-			Action:    func() (ctrl.Result, error) { return logic.HandleBackupPending(ctx, r.Deps, backup, false) },
+			Condition: func() bool { return p == v1.PhaseUnknown || p == v1.PhasePending },
+			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupPending(ctx, r.Deps, resticBackup) },
 		},
 		utils.Step{
-			Condition: func() bool { return backup.Status.Phase == v1.PhaseRunning },
-			Action:    func() (ctrl.Result, error) { return logic.HandleBackupRunning(ctx, r.Deps, backup) },
+			Condition: func() bool { return p == v1.PhaseRunning },
+			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupRunning(ctx, r.Deps, resticBackup) },
 		},
 		utils.Step{
-			Condition: func() bool { return backup.Status.Phase == v1.PhaseCompleted },
-			Action:    func() (ctrl.Result, error) { return logic.HandleBackupCompleted(ctx, r.Deps, backup) },
+			Condition: func() bool { return p == v1.PhaseCompleted },
+			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupCompleted(ctx, r.Deps, resticBackup) },
 		},
 		utils.Step{
-			Condition: func() bool { return backup.Status.Phase == v1.PhaseFailed },
-			Action:    func() (ctrl.Result, error) { return logic.HandleBackupFailed(ctx, r.Deps, backup) },
+			Condition: func() bool { return p == v1.PhaseFailed },
+			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupFailed(ctx, r.Deps, resticBackup) },
+		},
+		utils.Step{
+			Condition: func() bool { return p == v1.PhaseDeletion },
+			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupDeletion(ctx, r.Deps, resticBackup) },
 		},
 		utils.Step{
 			Condition: func() bool { return true }, // Default case
 			Action: func() (ctrl.Result, error) {
-				r.Deps.Logger.Infow("Unknown or unhandled phase", "phase", backup.Status.Phase)
-				return logic.HandlePendingPhase(ctx, r.Deps, backup)
+				r.Deps.Logger.Infow("Unknown or unhandled phase", "phase", p)
+				return ctrl.Result{}, fmt.Errorf("unknown or unhandled phase: %s", p)
 			},
 		},
 	)

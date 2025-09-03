@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/sladg/datarestor-operator/api/v1alpha1"
@@ -28,7 +29,7 @@ func FindMatchingResources[T client.Object](
 		// Get resources from specified namespaces
 		if len(selector.Namespaces) > 0 {
 			for _, ns := range selector.Namespaces {
-				if err := deps.Client.List(ctx, list, client.InNamespace(ns)); err != nil {
+				if err := deps.List(ctx, list, client.InNamespace(ns)); err != nil {
 					log.Debugw("Failed to list resources in namespace", "error", err, "namespace", ns)
 					return nil, err
 				}
@@ -36,7 +37,7 @@ func FindMatchingResources[T client.Object](
 			}
 		} else {
 			// If no namespaces specified, search all namespaces
-			if err := deps.Client.List(ctx, list); err != nil {
+			if err := deps.List(ctx, list); err != nil {
 				log.Debugw("Failed to list resources in all namespaces", "error", err)
 				return nil, err
 			}
@@ -55,40 +56,30 @@ func filterMatchingResources[T client.Object](list client.ObjectList, selector v
 
 	for i := 0; i < items.Len(); i++ {
 		item := items.Index(i).Interface()
-		if obj, ok := item.(T); ok {
-			if matchesSelector(obj, selector) {
-				matches = append(matches, obj)
-			}
+
+		// Check if T is a pointer type
+		var obj T
+		if reflect.TypeOf(obj).Kind() == reflect.Ptr {
+			// T is a pointer type, so we need to take the address of the item
+			itemValue := reflect.ValueOf(item)
+			itemPtr := reflect.New(itemValue.Type())
+			itemPtr.Elem().Set(itemValue)
+			obj = itemPtr.Interface().(T)
 		} else {
-			log.Debugw("Failed to cast item to requested type", "item", item)
+			// T is a value type, so we can cast directly
+			var ok bool
+			obj, ok = item.(T)
+			if !ok {
+				log.Debugw("Failed to cast item to requested type", "item", item)
+				continue
+			}
+		}
+
+		if matchesSelector(obj, &selector) {
+			matches = append(matches, obj)
 		}
 	}
 	return matches
-}
-
-// FindMatchingPVCs is a convenience wrapper around FindMatchingResources for PVCs
-func FindMatchingPVCs(ctx context.Context, deps *Dependencies, selector *v1alpha1.Selector) ([]corev1.PersistentVolumeClaim, error) {
-	list := &corev1.PersistentVolumeClaimList{}
-	pvcs, err := FindMatchingResources[*corev1.PersistentVolumeClaim](ctx, deps, []v1alpha1.Selector{*selector}, list)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert []*corev1.PersistentVolumeClaim to []corev1.PersistentVolumeClaim
-	result := make([]corev1.PersistentVolumeClaim, len(pvcs))
-	for i, pvc := range pvcs {
-		result[i] = *pvc
-	}
-	return result, nil
-}
-
-// FindPVCByName finds a PVC by name in a specific namespace
-func FindPVCByName(ctx context.Context, deps *Dependencies, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := deps.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, pvc); err != nil {
-		return nil, err
-	}
-	return pvc, nil
 }
 
 // FindBackupsByRepository finds all ResticBackup resources for a given ResticRepository
@@ -132,7 +123,7 @@ func FindRestoresByRepository(ctx context.Context, deps *Dependencies, namespace
 // FindRestoresByBackupName finds all ResticRestore resources for a given ResticBackup name
 func FindRestoresByBackupName(ctx context.Context, deps *Dependencies, namespace, backupName string) ([]v1alpha1.ResticRestore, error) {
 	var restoreList v1alpha1.ResticRestoreList
-	if err := deps.Client.List(ctx, &restoreList, client.InNamespace(namespace)); err != nil {
+	if err := deps.List(ctx, &restoreList, client.InNamespace(namespace)); err != nil {
 		return nil, err
 	}
 
@@ -148,11 +139,11 @@ func FindRestoresByBackupName(ctx context.Context, deps *Dependencies, namespace
 // FindPodsForJob finds all pods for a given Job
 func FindPodsForJob(ctx context.Context, deps *Dependencies, job *batchv1.Job) (*corev1.PodList, error) {
 	podList := &corev1.PodList{}
-	err := deps.Client.List(ctx, podList, client.InNamespace(job.Namespace), client.MatchingLabels{
+	err := deps.List(ctx, podList, client.InNamespace(job.Namespace), client.MatchingLabels{
 		"controller-uid": string(job.UID),
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list pods for job %s in namespace %s: %w", job.Name, job.Namespace, err)
 	}
 	return podList, nil
 }
@@ -160,7 +151,7 @@ func FindPodsForJob(ctx context.Context, deps *Dependencies, job *batchv1.Job) (
 // MatchesAnySelector checks if the resource matches any of the selectors in the list.
 func MatchesAnySelector(obj client.Object, selectors []v1alpha1.Selector) bool {
 	for _, selector := range selectors {
-		if matchesSelector(obj, selector) {
+		if matchesSelector(obj, &selector) {
 			return true
 		}
 	}
@@ -171,18 +162,17 @@ func MatchesAnySelector(obj client.Object, selectors []v1alpha1.Selector) bool {
 func FindMatchingSelectors(obj client.Object, selectors []v1alpha1.Selector) []v1alpha1.Selector {
 	var matchingSelectors []v1alpha1.Selector
 	for _, s := range selectors {
-		if matchesSelector(obj, s) {
+		if matchesSelector(obj, &s) {
 			matchingSelectors = append(matchingSelectors, s)
 		}
 	}
 	return matchingSelectors
 }
 
-// matchesSelector checks if a resource matches a selector
-func matchesSelector(obj client.Object, selector v1alpha1.Selector) bool {
+func matchesSelector(obj client.Object, selector *v1alpha1.Selector) bool {
 	// Check label selector
-	if selector.LabelSelector != nil {
-		labelSelector, err := metav1.LabelSelectorAsSelector(selector.LabelSelector)
+	if selector.LabelSelector.MatchLabels != nil || selector.LabelSelector.MatchExpressions != nil {
+		labelSelector, err := metav1.LabelSelectorAsSelector(&selector.LabelSelector)
 		if err != nil {
 			return false
 		}

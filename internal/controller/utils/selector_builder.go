@@ -21,7 +21,7 @@ func SelectorForResource(namespace string, name *string, matchLabels map[string]
 	}
 
 	if matchLabels != nil {
-		selector.LabelSelector = &metav1.LabelSelector{
+		selector.LabelSelector = metav1.LabelSelector{
 			MatchLabels: matchLabels,
 		}
 	} else if name != nil {

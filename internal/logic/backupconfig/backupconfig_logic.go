@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -53,8 +50,8 @@ func EnsureResticRepositories(ctx context.Context, deps *utils.Dependencies, bac
 			Names:      []string{target.Repository.Name},
 			Namespaces: []string{backupConfig.Namespace},
 		}
-		repoList := &v1.ResticRepositoryList{}
-		repos, err := utils.FindMatchingResources[*v1.ResticRepository](ctx, deps, []v1.Selector{repoSelector}, repoList)
+
+		repos, err := utils.FindMatchingResources[*v1.ResticRepository](ctx, deps, []v1.Selector{repoSelector}, &v1.ResticRepositoryList{})
 		if err != nil {
 			return fmt.Errorf("failed to find repository: %w", err)
 		}
@@ -65,7 +62,7 @@ func EnsureResticRepositories(ctx context.Context, deps *utils.Dependencies, bac
 		for _, repository := range repos {
 			if !isOwnedByBackupConfig(repository, backupConfig) {
 				if err := controllerutil.SetControllerReference(backupConfig, repository, deps.Scheme); err == nil {
-					_ = deps.Client.Update(ctx, repository)
+					_ = deps.Update(ctx, repository)
 				}
 			}
 		}
@@ -75,19 +72,13 @@ func EnsureResticRepositories(ctx context.Context, deps *utils.Dependencies, bac
 }
 
 // HandleAutoRestore handles the auto-restore logic for newly claimed PVCs.
-func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, managedPVCs []string) error {
+func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, managedPVCs []*corev1.PersistentVolumeClaim) error {
 	log := deps.Logger.Named("handle-auto-restore")
 	if !backupConfig.Spec.AutoRestore {
 		return nil
 	}
 
-	for _, pvcName := range managedPVCs {
-		pvc := &corev1.PersistentVolumeClaim{}
-		if err := deps.Client.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: backupConfig.Namespace}, pvc); err != nil {
-			log.Errorw("Failed to get PVC for auto-restore check", "pvc", pvcName, "error", err)
-			continue
-		}
-
+	for _, pvc := range managedPVCs {
 		// If the PVC already has the restore finalizer, it's either being restored or has been restored.
 		if controllerutil.ContainsFinalizer(pvc, constants.PVCRestoreFinalizer) {
 			log.Debugw("PVC already has restore finalizer, skipping auto-restore", "pvc", pvc.Name)
@@ -100,12 +91,12 @@ func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConf
 		// This logic assumes the first target is the one to restore from, which might need refinement.
 		if len(backupConfig.Spec.BackupTargets) > 0 {
 			target := backupConfig.Spec.BackupTargets[0]
-			repo, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, backupConfig.Namespace, target.Repository.Name, log)
+			repo, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, backupConfig.Namespace, target.Repository.Name)
 			if err != nil {
 				log.Errorw("Failed to get ResticRepository for auto-restore", "repo", target.Repository.Name, "error", err)
 				continue
 			}
-			if err := createResticRestore(ctx, deps, backupConfig, pvc, *repo); err != nil {
+			if err := createResticRestore(ctx, deps, backupConfig, pvc, repo, ""); err != nil {
 				log.Errorw("Failed to create ResticRestore for new PVC", "pvc", pvc.Name, "error", err)
 				// Continue to next PVC, don't block everything
 			}
@@ -114,7 +105,7 @@ func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConf
 		}
 		// Add finalizer to mark it as processed by us for restore
 		controllerutil.AddFinalizer(pvc, constants.PVCRestoreFinalizer)
-		if err := deps.Client.Update(ctx, pvc); err != nil {
+		if err := deps.Update(ctx, pvc); err != nil {
 			log.Errorw("Failed to add finalizer to PVC after auto-restore", "pvc", pvc.Name, "error", err)
 		}
 	}
@@ -122,12 +113,12 @@ func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConf
 }
 
 // HandleScheduledBackups handles scheduled backups on a per-target basis.
-func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, managedPVCs []string, cronParser *cron.Parser) error {
+func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, managedPVCs []*corev1.PersistentVolumeClaim) error {
 	log := deps.Logger.Named("handle-scheduled-backups")
 
 	// Get existing ResticBackups to check their status
 	existingBackups := &v1.ResticBackupList{}
-	if err := deps.Client.List(ctx, existingBackups, client.InNamespace(backupConfig.Namespace), client.MatchingLabels{
+	if err := deps.List(ctx, existingBackups, client.InNamespace(backupConfig.Namespace), client.MatchingLabels{
 		"backup-config": backupConfig.Name,
 	}); err != nil {
 		log.Errorw("Failed to list existing backups", "error", err)
@@ -142,12 +133,7 @@ func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backu
 		}
 
 		// Process each PVC for this target
-		for _, pvcName := range managedPVCs {
-			pvc := &corev1.PersistentVolumeClaim{}
-			if err := deps.Client.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: backupConfig.Namespace}, pvc); err != nil {
-				log.Errorw("Failed to get PVC", "pvc", pvcName, "error", err)
-				continue
-			}
+		for _, pvc := range managedPVCs {
 
 			// Find the latest successful backup for this PVC and target
 			var lastBackupTime *time.Time
@@ -169,7 +155,7 @@ func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backu
 					"pvc", pvc.Name,
 					"lastBackup", lastBackupTime)
 
-				repo, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, backupConfig.Namespace, target.Repository.Name, log)
+				repo, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, backupConfig.Namespace, target.Repository.Name)
 				if err != nil {
 					log.Errorw("Failed to get ResticRepository for scheduled backup", "repo", target.Repository.Name, "error", err)
 					continue
@@ -182,96 +168,7 @@ func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backu
 					pvc.Name,
 					time.Now().Unix())
 
-				if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, *target, *repo); err != nil {
-					log.Errorw("Failed to create scheduled backup",
-						"pvc", pvc.Name,
-						"target", target.Name,
-						"error", err)
-					continue
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// HandleSchedule processes scheduled backups for all PVCs managed by the BackupConfig.
-// For each target with a backup schedule:
-//  1. Finds all managed PVCs
-//  2. Checks the last successful backup for each PVC
-//  3. Creates new backups when needed based on the schedule
-//
-// The function ensures each PVC is backed up according to its target's schedule,
-// tracking the last successful backup to prevent unnecessary operations.
-func HandleSchedule(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, managedPVCs []string) error {
-	log := deps.Logger.Named("handle-schedule")
-
-	// Find all managed PVCs once since we'll need them for all targets
-	selector := v1.Selector{
-		Names:      managedPVCs,
-		Namespaces: []string{backupConfig.Namespace},
-	}
-
-	pvcs, err := utils.FindMatchingPVCs(ctx, deps, &selector)
-	if err != nil {
-		log.Errorw("Failed to find managed PVCs", "error", err)
-		return err
-	}
-
-	// Get existing ResticBackups to check their status using selector
-	backupSelector := v1.Selector{
-		Namespaces: []string{backupConfig.Namespace},
-		LabelSelector: &metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				"backup-config": backupConfig.Name,
-			},
-		},
-	}
-
-	backupList := &v1.ResticBackupList{}
-	existingBackups, err := utils.FindMatchingResources[*v1.ResticBackup](ctx, deps, []v1.Selector{backupSelector}, backupList)
-	if err != nil {
-		log.Errorw("Failed to find existing backups", "error", err)
-		return err
-	}
-
-	// Process each backup target that has a schedule
-	for i := range backupConfig.Spec.BackupTargets {
-		target := &backupConfig.Spec.BackupTargets[i]
-		if target.BackupSchedule == "" {
-			continue // Skip targets without schedule
-		}
-
-		// Process each PVC for this target
-		for _, pvc := range pvcs {
-			// Find the latest successful backup for this PVC and target
-			var lastBackupTime *time.Time
-			for _, backup := range existingBackups {
-				if backup.Labels["pvc"] == pvc.Name && backup.Labels["backup-target"] == target.Name {
-					if backup.Status.CompletionTime != nil && backup.Status.Phase == v1.PhaseCompleted {
-						t := backup.Status.CompletionTime.Time
-						if lastBackupTime == nil || t.After(*lastBackupTime) {
-							lastBackupTime = &t
-						}
-					}
-				}
-			}
-
-			// Create new backup if needed based on schedule
-			if utils.ShouldPerformBackup(target.BackupSchedule, lastBackupTime) {
-				log.Infow("Creating scheduled backup",
-					"target", target.Name,
-					"pvc", pvc.Name,
-					"lastBackup", lastBackupTime)
-
-				repo, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, backupConfig.Namespace, target.Repository.Name, log)
-				if err != nil {
-					log.Errorw("Failed to get ResticRepository for scheduled backup", "repo", target.Repository.Name, "error", err)
-					continue
-				}
-				backupName := getScheduledBackupName(backupConfig.Name, target.Name, pvc.Name)
-				if err := createResticBackup(ctx, deps, backupConfig, &pvc, backupName, *target, *repo); err != nil {
+				if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, *target, repo); err != nil {
 					log.Errorw("Failed to create scheduled backup",
 						"pvc", pvc.Name,
 						"target", target.Name,

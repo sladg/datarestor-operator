@@ -12,18 +12,20 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
 )
 
 // ManageWorkloadScaleForPVC handles scaling workloads up or down for a given PVC.
 // It manages finalizers and annotations on the owner object.
-func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc *corev1.PersistentVolumeClaim, owner client.Object, scaleDown bool) error {
+func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object, scaleDown bool) error {
 	log := deps.Logger.Named("workload-scaler").With("pvc", pvc.Name, "namespace", pvc.Namespace)
 
 	workloads, err := ScaleWorkloads(ctx, deps.Client, pvc, -1, log)
 	if err != nil {
 		return fmt.Errorf("failed to find workloads for PVC %s: %w", pvc.Name, err)
 	}
+
 	if len(workloads) == 0 {
 		log.Info("No workloads found for PVC, skipping scaling")
 		return nil
@@ -31,8 +33,18 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc *cor
 
 	if scaleDown {
 		// Scale Down Logic
-		if err := StoreOriginalReplicasInAnnotation(ctx, deps, owner, workloads); err != nil {
+		originalReplicas, err := GetOriginalReplicasInfo(ctx, deps, workloads)
+
+		if err != nil {
 			return fmt.Errorf("failed to store original replica annotation: %w", err)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to marshal original replica counts: %w", err)
+		}
+
+		if err := SetOriginalReplicasAnnotation(ctx, deps, owner, originalReplicas); err != nil {
+			return fmt.Errorf("failed to set original replica annotation: %w", err)
 		}
 
 		for _, workload := range workloads {
@@ -40,7 +52,7 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc *cor
 				log.Errorw("Failed to add finalizer to workload", "error", err, "workload", workload.GetName())
 			}
 			patch := []byte(`{"spec":{"replicas":0}}`)
-			if err := deps.Client.Patch(ctx, workload, client.RawPatch(types.MergePatchType, patch)); err != nil {
+			if err := deps.Patch(ctx, workload, client.RawPatch(types.MergePatchType, patch)); err != nil {
 				log.Errorw("Failed to scale down workload", "error", err, "workload", workload.GetName())
 			}
 		}
@@ -67,7 +79,7 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc *cor
 			}
 
 			patch := []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, info.Replicas))
-			if err := deps.Client.Patch(ctx, wl, client.RawPatch(types.MergePatchType, patch)); err != nil {
+			if err := deps.Patch(ctx, wl, client.RawPatch(types.MergePatchType, patch)); err != nil {
 				log.Errorw("Failed to restore replica count", "workload", wl.GetName(), "error", err)
 				continue
 			}
@@ -83,7 +95,7 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc *cor
 }
 
 // checkPodsTerminated waits for all pods using a PVC to be terminated.
-func checkPodsTerminated(ctx context.Context, deps *Dependencies, pvc *corev1.PersistentVolumeClaim) error {
+func checkPodsTerminated(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference) error {
 	log := deps.Logger.Named("check-pods-terminated")
 	for i := 0; i < 30; i++ { // Poll for a max of 5 minutes (30 * 10s)
 		workloads, err := ScaleWorkloads(ctx, deps.Client, pvc, -1, log) // -1 means don't scale, just find
@@ -122,7 +134,7 @@ func checkPodsTerminated(ctx context.Context, deps *Dependencies, pvc *corev1.Pe
 // ScaleWorkloads finds all Deployments and StatefulSets using a given PVC and scales them
 // to the specified replica count. It returns a list of the workloads that were scaled.
 // A replica count of -1 can be used to just find the workloads without scaling them.
-func ScaleWorkloads(ctx context.Context, c client.Client, pvc *corev1.PersistentVolumeClaim, replicas int32, logger *zap.SugaredLogger) ([]client.Object, error) {
+func ScaleWorkloads(ctx context.Context, c client.Client, pvc corev1.ObjectReference, replicas int32, logger *zap.SugaredLogger) ([]client.Object, error) {
 	logger = logger.Named("workload-scaler").With("pvc", pvc.Name, "namespace", pvc.Namespace)
 	logger.Debugw("Finding/Scaling workloads", "replicas", replicas)
 
@@ -149,7 +161,7 @@ func ScaleWorkloads(ctx context.Context, c client.Client, pvc *corev1.Persistent
 	}
 
 	// 3. Find the owner workloads (Deployments or StatefulSets) and scale them
-	var scaledWorkloads []client.Object
+	scaledWorkloads := make([]client.Object, 0, len(mountingPods))
 	processedOwners := make(map[types.UID]bool)
 
 	for _, pod := range mountingPods {
@@ -222,4 +234,16 @@ func findScalableWorkload(ctx context.Context, c client.Client, owner *metav1.Ow
 
 	// We don't handle other kinds of owners (e.g., DaemonSet, Job)
 	return nil, nil
+}
+
+func ShouldStopPods(backupConfig *v1.BackupConfig) bool {
+	selectors := backupConfig.Spec.Selectors
+
+	for _, selector := range selectors {
+		if selector.StopPods {
+			return true
+		}
+	}
+
+	return false
 }

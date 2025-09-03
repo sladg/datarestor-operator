@@ -30,6 +30,7 @@ const (
 
 const (
 	DefaultRequeueInterval    = 30 * time.Second
-	FailedRequeueInterval     = 5 * time.Minute // Requeue interval after a failed operation
-	RepositoryRequeueInterval = 1 * time.Hour   // Requeue interval for repository maintenance or long waits
+	FailedRequeueInterval     = 5 * time.Minute
+	RepositoryRequeueInterval = 1 * time.Hour
+	ImmediateRequeueInterval  = 0 * time.Second
 )

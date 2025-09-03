@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 
-	"github.com/robfig/cron/v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -17,18 +16,14 @@ import (
 	logic "github.com/sladg/datarestor-operator/internal/logic/backupconfig"
 )
 
-// NewBackupConfigReconciler creates a new BackupConfigReconciler
 func NewBackupConfigReconciler(deps *utils.Dependencies) (*BackupConfigReconciler, error) {
 	return &BackupConfigReconciler{
-		Deps:       deps,
-		cronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		Deps: deps,
 	}, nil
 }
 
-// BackupConfigReconciler reconciles a BackupConfig object
 type BackupConfigReconciler struct {
-	Deps       *utils.Dependencies
-	cronParser cron.Parser
+	Deps *utils.Dependencies
 }
 
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=backupconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -42,21 +37,12 @@ type BackupConfigReconciler struct {
 // +kubebuilder:rbac:groups="apps",resources=deployments;statefulsets,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the BackupConfig object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.17.3/pkg/reconcile
 func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
 
 	// Fetch the BackupConfig instance
 	backupConfig := &v1.BackupConfig{}
-	if err := r.Deps.Client.Get(ctx, req.NamespacedName, backupConfig); err != nil {
+	if err := r.Deps.Get(ctx, req.NamespacedName, backupConfig); err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
@@ -86,56 +72,46 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
-	// Discover and match PVCs
-	managedPVCs, err := logic.DiscoverMatchingPVCs(ctx, r.Deps, backupConfig)
+	// Discover and match PVCs using BackupConfig selectors
+	pvcList := &corev1.PersistentVolumeClaimList{}
+	pvcs, err := utils.FindMatchingResources[*corev1.PersistentVolumeClaim](ctx, r.Deps, backupConfig.Spec.Selectors, pvcList)
 	if err != nil {
-		log.Errorw("Failed to discover and match PVCs", "error", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
-	}
-
-	// Update status with managed PVCs count
-	if err := logic.UpdateStatusPVCsCount(ctx, r.Deps, backupConfig, managedPVCs); err != nil {
-		log.Errorw("Failed to update managed PVCs status", "error", err)
+		log.Errorw("Failed to find managed PVCs", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
 	// Handle auto-restore logic
-	if err := logic.HandleAutoRestore(ctx, r.Deps, backupConfig, managedPVCs); err != nil {
+	if err := logic.HandleAutoRestore(ctx, r.Deps, backupConfig, pvcs); err != nil {
 		log.Errorw("Failed to handle auto-restore", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
 	// Handle manual backup/restore annotations
-	if err := logic.HandleAnnotations(ctx, r.Deps, backupConfig, managedPVCs); err != nil {
+	if err := logic.HandleAnnotations(ctx, r.Deps, backupConfig, pvcs); err != nil {
 		log.Errorw("Failed to handle annotations", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
 	// Handle scheduled backups on a per-target basis
-	if err := logic.HandleScheduledBackups(ctx, r.Deps, backupConfig, managedPVCs, &r.cronParser); err != nil {
+	if err := logic.HandleScheduledBackups(ctx, r.Deps, backupConfig, pvcs); err != nil {
 		log.Errorw("Failed to handle scheduled backups", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
-	// 9. TODO: Handle retention policy on a per-target basis
-
 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
 func (r *BackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	r.cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.BackupConfig{}).
 		Owns(&v1.ResticRepository{}).
 		Watches(
 			&corev1.PersistentVolumeClaim{},
-			handler.EnqueueRequestsFromMapFunc(watches.FindObjectsForPVC(mgr.GetClient())),
+			handler.EnqueueRequestsFromMapFunc(watches.FindObjectsForPVC(r.Deps)),
 		).
 		Watches(
 			&corev1.Pod{},
-			handler.EnqueueRequestsFromMapFunc(watches.FindObjectsForPod(mgr.GetClient())),
+			handler.EnqueueRequestsFromMapFunc(watches.FindObjectsForPod(r.Deps)),
 		).
 		Complete(r)
 }

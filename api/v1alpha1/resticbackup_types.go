@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -24,7 +26,7 @@ import (
 type ResticBackupSpec struct {
 	// Reference to the ResticRepository in the same namespace
 	// +required
-	Repository ResticRepositoryRef `json:"repository"`
+	Repository *ResticRepository `json:"repository"`
 
 	// Name of the backup
 	// +required
@@ -38,11 +40,7 @@ type ResticBackupSpec struct {
 
 	// PVC that was/is being backed up
 	// +required
-	SourcePVC PersistentVolumeClaimRef `json:"sourcePVC"`
-
-	// Restic configuration for restore target
-	// +required
-	Restic ResticRepositorySpec `json:"restic"`
+	SourcePVC corev1.ObjectReference `json:"sourcePVC"`
 
 	// Arguments to pass to restic restore command
 	// Examples: ["--path", "/data", "--include", "*.sql", "--exclude", "cache/"]
@@ -61,15 +59,15 @@ type ResticBackupStatus struct {
 
 	// Reference to the backup job
 	// +optional
-	Job JobReference `json:"job,omitempty"`
+	Job *batchv1.Job `json:"job,omitempty"`
 
 	// Duration of the backup job as a string.
 	// +optional
-	Duration *metav1.Duration `json:"duration,omitempty"`
+	Duration metav1.Duration `json:"duration,omitempty"`
 
 	// Time when the backup was created in the repository
 	// +optional
-	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+	CreatedAt metav1.Time `json:"createdAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

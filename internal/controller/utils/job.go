@@ -9,50 +9,8 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
-
-// BuildBackupJobCommand returns command/args for a restic backup job.
-func BuildBackupJobCommand(backupName string, customArgs []string) ([]string, []string, error) {
-	command := []string{"restic", "backup"}
-	args := []string{"/data"}
-	if backupName != "" {
-		args = append(args, "--tag", backupName)
-	}
-	args = append(args, customArgs...)
-	return command, args, nil
-}
-
-// BuildRestoreJobCommand returns command/args for a restic restore job.
-func BuildRestoreJobCommand(snapshotID string) ([]string, []string, error) {
-	if snapshotID == "" {
-		snapshotID = "latest"
-	}
-	command := []string{"restic", "restore"}
-	args := []string{snapshotID, "--target", "/data"}
-	return command, args, nil
-}
-
-// CreateRestoreJobWithOutput returns placeholder Job and ConfigMap objects.
-func CreateRestoreJobWithOutput(_ context.Context, _ client.Client, _ corev1.PersistentVolumeClaim, _ v1.BackupTarget, _ string, _ metav1.Object) (*batchv1.Job, *corev1.ConfigMap, error) {
-	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "stub-restore-job"}}
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "stub-output-cm"}}
-	return job, cm, nil
-}
-
-// CleanupJob is a no-op placeholder.
-func CleanupJob(_ context.Context, _ client.Client, _ string, _ string) error {
-	return nil
-}
-
-// GetRepositoryNameForTarget computes a stable repository name for a target.
-func GetRepositoryNameForTarget(target v1.BackupTarget) string {
-	if target.Name != "" {
-		return "repo-" + target.Name
-	}
-	return "repo-default"
-}
 
 // ResticJobSpec defines the specification for a restic job
 type ResticJobSpec struct {
@@ -67,11 +25,6 @@ type ResticJobSpec struct {
 	VolumeMounts []corev1.VolumeMount
 	Volumes      []corev1.Volume
 	Owner        metav1.Object
-}
-
-// BuildInitJobCommand returns command/args for repository initialization
-func BuildInitJobCommand(repository string) ([]string, []string, error) {
-	return []string{"restic", "init"}, []string{"--repo", repository}, nil
 }
 
 // CreateResticJobWithOutput creates a restic job with output capture
@@ -146,6 +99,20 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 		return nil, nil, err
 	}
 
+	// Actually create the job in the cluster
+	if err := deps.Create(ctx, job); err != nil {
+		return nil, nil, fmt.Errorf("failed to create job in Kubernetes: %w", err)
+	}
+
+	// Actually create the ConfigMap in the cluster
+	if err := deps.Create(ctx, cm); err != nil {
+		// Attempt to clean up the job since the ConfigMap creation failed
+		if deleteErr := deps.Delete(ctx, job); deleteErr != nil {
+			return nil, nil, fmt.Errorf("failed to create ConfigMap: %w, and failed to clean up job: %v", err, deleteErr)
+		}
+		return nil, nil, fmt.Errorf("failed to create ConfigMap: %w", err)
+	}
+
 	return job, cm, nil
 }
 
@@ -159,5 +126,6 @@ func IsJobFinished(job *batchv1.Job) (finished bool, succeeded bool) {
 	if job.Status.Failed > 0 {
 		return true, false
 	}
+
 	return false, false
 }

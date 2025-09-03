@@ -6,26 +6,6 @@ metadata:
   labels:
     name: backup-test
 ---
-# Test secrets for Restic authentication
-apiVersion: v1
-kind: Secret
-metadata:
-  name: restic-secret
-  namespace: backup-test
-stringData:
-  password: test-password-123
----
-# MinIO credentials for S3 testing
-apiVersion: v1
-kind: Secret
-metadata:
-  name: minio-credentials
-  namespace: backup-test
-stringData:
-  access-key-id: minioadmin
-  secret-access-key: minioadmin
-
----
 # MinIO S3-compatible storage
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -37,7 +17,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
+      storage: 1Gi
   storageClassName: standard
 ---
 apiVersion: apps/v1

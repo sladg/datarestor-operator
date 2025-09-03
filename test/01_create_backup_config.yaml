@@ -1,87 +1,55 @@
-# BackupConfig with multiple targets for testing
 apiVersion: backup.datarestor-operator.com/v1alpha1
-kind: BackupConfig
+kind: ResticRepository
 metadata:
-  name: test-local-backup
-  namespace: backup-test
+  name: restic-onsite
 spec:
-  pvcSelector:
-    labelSelector:
-      matchLabels:
-        backup: "enabled"
-    namespaces: [backup-test]
-
-  backupTargets:
-    - name: local-backup
-      priority: 1
-      restic:
-        repository: "local:/mnt/repo/local-restic-repo"
-        env:
-          - name: RESTIC_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: restic-secret
-                key: password
-        tags: [test, local, primary]
-        host: "test-cluster"
-        flags: ["--verbose"]
-      retention:
-        maxSnapshots: 10
-        maxAge: "168h" # 7 days
-
-  schedule:
-    cron: "0 */5 * * *" # Every 5 hours
-    waitForHealthy: true
-    stopPods: false
-
-  autoRestore: true
-
+  target: s3:http://minio.backup-test:9000/onsite-backups
+  env:
+    - name: RESTIC_PASSWORD
+      value: mySuperSecret123
+    - name: AWS_ACCESS_KEY_ID
+      value: minioadmin
+    - name: AWS_SECRET_ACCESS_KEY
+      value: minioadmin
 ---
-# BackupConfig with S3 (MinIO) target
+apiVersion: backup.datarestor-operator.com/v1alpha1
+kind: ResticRepository
+metadata:
+  name: restic-offsite
+spec:
+  target: s3:http://minio.backup-test:9000/offsite-backups
+  env:
+    - name: RESTIC_PASSWORD
+      value: myCloudSecretKey123
+    - name: AWS_ACCESS_KEY_ID
+      value: minioadmin
+    - name: AWS_SECRET_ACCESS_KEY
+      value: minioadmin
+---
 apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: BackupConfig
 metadata:
-  name: test-s3-backup
-  namespace: backup-test
+  name: restic-backups
 spec:
-  pvcSelector:
-    labelSelector:
-      matchLabels:
-        backup: "enabled"
-        environment: "test"
-    namespaces: [backup-test]
+  selectors:
+    - labelSelector:
+        matchLabels:
+          backup: "true"
+      stopPods: true # scale workloads to 0 during backup/restore
+    - namespaces: ["default"]
 
   backupTargets:
-    - name: s3-backup
+    - name: minio-onsite
       priority: 1
-      restic:
-        repository: "s3:http://minio.backup-test.svc.cluster.local:9000/restic-backups"
-        env:
-          - name: RESTIC_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: restic-secret
-                key: password
-          - name: AWS_ACCESS_KEY_ID
-            valueFrom:
-              secretKeyRef:
-                name: minio-credentials
-                key: access-key-id
-          - name: AWS_SECRET_ACCESS_KEY
-            valueFrom:
-              secretKeyRef:
-                name: minio-credentials
-                key: secret-access-key
-        tags: [test, s3, minio]
-        host: "test-cluster"
-        flags: ["--verbose"]
-      retention:
-        maxSnapshots: 7
-        maxAge: "96h" # 4 days
+      repository:
+        name: restic-onsite
+      backupSchedule: "0 2 * * *" # every night at 02:00
+      retentionSchedule: "0 3 * * *" # prune right after backups
+    - name: minio-offsite
+      priority: 2
+      repository:
+        name: restic-offsite
+      backupSchedule: "0 2 * * 1" # weekly
+      retentionSchedule: "0 3 * * 1" # monthly
 
-  schedule:
-    cron: "0 */5 * * *" # Every 5 hours
-    waitForHealthy: true
-    stopPods: false
-
-  autoRestore: false # Manual restore only for this one
+  autoRestore: true # re-hydrate PVCs automatically on a fresh cluster

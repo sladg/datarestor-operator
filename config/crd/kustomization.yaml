@@ -2,9 +2,10 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
+  - bases/backup.datarestor-operator.com_resticrepositories.yaml
+  - bases/backup.datarestor-operator.com_resticbackups.yaml
+  - bases/backup.datarestor-operator.com_resticrestores.yaml
   - bases/backup.datarestor-operator.com_backupconfigs.yaml
-  - bases/backup.datarestor-operator.com_backupjobs.yaml
-  - bases/backup.datarestor-operator.com_restorejobs.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

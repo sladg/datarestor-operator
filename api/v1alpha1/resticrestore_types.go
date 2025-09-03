@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -24,7 +26,7 @@ import (
 type ResticRestoreSpec struct {
 	// Reference to the ResticRepository in the same namespace
 	// +required
-	Repository ResticRepositoryRef `json:"repository"`
+	Repository *ResticRepository `json:"repository"`
 
 	// Name of the ResticBackup to restore from
 	// +required
@@ -35,11 +37,7 @@ type ResticRestoreSpec struct {
 
 	// Target PVC name to restore data into
 	// +required
-	TargetPVC PersistentVolumeClaimRef `json:"targetPVC"`
-
-	// Restic configuration for restore target
-	// +required
-	Restic ResticRepositorySpec `json:"restic"`
+	TargetPVC corev1.ObjectReference `json:"targetPVC"`
 
 	// Arguments to pass to restic restore command
 	// Examples: ["--path", "/data", "--include", "*.sql", "--exclude", "cache/"]
@@ -58,25 +56,25 @@ type ResticRestoreStatus struct {
 
 	// Reference to the restore job
 	// +optional
-	Job JobReference `json:"job,omitempty"`
+	Job *batchv1.Job `json:"job,omitempty"`
 
 	// Duration of the restore operation
 	// +optional
-	Duration *metav1.Duration `json:"duration,omitempty"`
+	Duration metav1.Duration `json:"duration,omitempty"`
 
 	// Time when the backup was created in the repository
 	// +optional
-	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+	CreatedAt metav1.Time `json:"createdAt,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:name="Backup",type="string",JSONPath=".spec.name"
-//+kubebuilder:printcolumn:name="Target PVC",type="string",JSONPath=".spec.targetPVC.name"
-//+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
-//+kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
-//+kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
-//+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Backup",type="string",JSONPath=".spec.name"
+// +kubebuilder:printcolumn:name="Target PVC",type="string",JSONPath=".spec.targetPVC.name"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
+// +kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ResticRestore is the Schema for the resticrestores API
 type ResticRestore struct {
@@ -96,7 +94,7 @@ func (r *ResticRestore) GetLogValues() []interface{} {
 	}
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // ResticRestoreList contains a list of ResticRestore
 type ResticRestoreList struct {

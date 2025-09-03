@@ -17,15 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ========================================
-// PHASE CONSTANTS (Grouped by CRD)
-// ========================================
-
-// Generic operation phases (used across all CRDs)
 type Phase string
 
 const (
@@ -37,11 +31,6 @@ const (
 	PhaseDeletion  Phase = "Deletion"
 )
 
-// ========================================
-// BACKUP TYPE DEFINITIONS
-// ========================================
-
-// BackupType defines the type of backup operation
 type BackupType string
 
 const (
@@ -55,10 +44,6 @@ const (
 	RestoreTypeManual    RestoreType = "manual"
 	RestoreTypeAutomated RestoreType = "automated"
 )
-
-// ========================================
-// OPERATIONAL CONSTANTS
-// ========================================
 
 const OperatorDomain = "backup.datarestor-operator.com"
 
@@ -83,26 +68,4 @@ type CommonStatus struct {
 	// Conditions represent the latest available observations
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
-// JobReference holds reference to a Kubernetes Job
-type JobReference struct {
-	// Reference to the Kubernetes Job
-	// +optional
-	JobRef *corev1.LocalObjectReference `json:"jobRef,omitempty"`
-}
-
-type PersistentVolumeClaimRef struct {
-	// +required
-	Name string `json:"name"`
-
-	// +required
-	Namespace string `json:"namespace"`
-}
-
-// ResticRepositoryRef contains a reference to a ResticRepository
-type ResticRepositoryRef struct {
-	// Name of the ResticRepository
-	// +required
-	Name string `json:"name"`
 }
