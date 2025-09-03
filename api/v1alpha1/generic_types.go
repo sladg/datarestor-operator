@@ -29,11 +29,12 @@ import (
 type Phase string
 
 const (
-	PhaseUnknown   = ""
-	PhasePending   = "Pending"   // Initial state, not yet started
-	PhaseRunning   = "Running"   // Operation in progress
-	PhaseCompleted = "Completed" // Operation finished successfully
-	PhaseFailed    = "Failed"    // Operation failed
+	PhaseUnknown   Phase = ""
+	PhasePending   Phase = "Pending"
+	PhaseRunning   Phase = "Running"
+	PhaseCompleted Phase = "Completed"
+	PhaseFailed    Phase = "Failed"
+	PhaseDeletion  Phase = "Deletion"
 )
 
 // ========================================
@@ -59,7 +60,7 @@ const (
 // OPERATIONAL CONSTANTS
 // ========================================
 
-// Note: OperatorDomain is now defined in internal/constants/constants.go to avoid duplication
+const OperatorDomain = "backup.datarestor-operator.com"
 
 // Common status fields for all CRDs
 type CommonStatus struct {

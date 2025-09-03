@@ -68,13 +68,15 @@ func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Handle deletion
 	if repository.DeletionTimestamp != nil {
-		return logic.HandleRepoDeletion(ctx, r.Deps, repository)
-	}
-
-	// Add finalizer if not present
-	if err := utils.AddFinalizer(ctx, r.Deps, repository, constants.ResticRepositoryFinalizer); err != nil {
-		log.Errorw("add finalizer failed", "error", err)
-		return ctrl.Result{}, err
+		if repository.Status.Phase != v1.PhaseDeletion {
+			return logic.UpdateRepoStatus(ctx, r.Deps, repository, v1.PhaseDeletion, metav1.Now(), "")
+		}
+	} else {
+		// Add finalizer if not present
+		if err := utils.AddFinalizer(ctx, r.Deps, repository, constants.ResticRepositoryFinalizer); err != nil {
+			log.Errorw("add finalizer failed", "error", err)
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Main reconciliation logic based on phase
@@ -89,6 +91,8 @@ func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return logic.HandleRepoMaintenance(ctx, r.Deps, repository)
 	case v1.PhaseFailed:
 		return logic.HandleRepoFailed(ctx, r.Deps, repository)
+	case v1.PhaseDeletion:
+		return logic.HandleRepositoryDeletion(ctx, r.Deps, repository)
 	default:
 		log.Errorw("Unknown phase", "phase", repository.Status.Phase)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil

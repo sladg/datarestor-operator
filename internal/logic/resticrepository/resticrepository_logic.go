@@ -60,7 +60,7 @@ func FindActiveJobForRepo(ctx context.Context, deps *utils.Dependencies, repo *v
 		LabelSelector: &metav1.LabelSelector{
 			MatchLabels: map[string]string{
 				"app.kubernetes.io/instance":   repo.Name,
-				"app.kubernetes.io/managed-by": constants.OperatorDomain,
+				"app.kubernetes.io/managed-by": v1.OperatorDomain,
 			},
 		},
 	}
@@ -156,21 +156,6 @@ func HandleRepoRunning(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 	// Job failed
 	log.Errorw("Init job failed")
 	return UpdateRepoStatus(ctx, deps, repo, v1.PhaseFailed, metav1.Now(), job.Name)
-}
-
-// HandleRepoDeletion handles the deletion of a ResticRepository.
-func HandleRepoDeletion(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-deletion")
-	log.Info("Starting deletion logic for ResticRepository")
-
-	// Cleanup logic here (e.g., delete jobs if any are running)
-	// For now, we assume jobs are owned and garbage collected.
-	if err := utils.RemoveFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer); err != nil {
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-	}
-
-	log.Info("Completed deletion logic for ResticRepository")
-	return ctrl.Result{}, nil
 }
 
 // CheckRepositoryExists checks if a repository exists by running a check job.

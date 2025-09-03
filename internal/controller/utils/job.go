@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sladg/datarestor-operator/api/v1alpha1"
-	"github.com/sladg/datarestor-operator/internal/constants"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +35,7 @@ func BuildRestoreJobCommand(snapshotID string) ([]string, []string, error) {
 }
 
 // CreateRestoreJobWithOutput returns placeholder Job and ConfigMap objects.
-func CreateRestoreJobWithOutput(_ context.Context, _ client.Client, _ corev1.PersistentVolumeClaim, _ v1alpha1.BackupTarget, _ string, _ metav1.Object) (*batchv1.Job, *corev1.ConfigMap, error) {
+func CreateRestoreJobWithOutput(_ context.Context, _ client.Client, _ corev1.PersistentVolumeClaim, _ v1.BackupTarget, _ string, _ metav1.Object) (*batchv1.Job, *corev1.ConfigMap, error) {
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "stub-restore-job"}}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "stub-output-cm"}}
 	return job, cm, nil
@@ -48,7 +47,7 @@ func CleanupJob(_ context.Context, _ client.Client, _ string, _ string) error {
 }
 
 // GetRepositoryNameForTarget computes a stable repository name for a target.
-func GetRepositoryNameForTarget(target v1alpha1.BackupTarget) string {
+func GetRepositoryNameForTarget(target v1.BackupTarget) string {
 	if target.Name != "" {
 		return "repo-" + target.Name
 	}
@@ -97,7 +96,7 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 	}
 
 	labels := map[string]string{
-		"app.kubernetes.io/managed-by": constants.OperatorDomain,
+		"app.kubernetes.io/managed-by": v1.OperatorDomain,
 		"app.kubernetes.io/instance":   actualOwner.GetName(),
 		"job-type":                     spec.JobType,
 	}

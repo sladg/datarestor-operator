@@ -1,61 +1,35 @@
 package constants
 
-import "time"
+import (
+	"time"
 
-// Domain for the operator
-const OperatorDomain = "backup.datarestor-operator.com"
-
-// Labels used for resource identification
-const (
-	// Resource identifiers
-	LabelPVCName      = OperatorDomain + "/pvc-name"      // Name of related PVC
-	LabelBackupConfig = OperatorDomain + "/backup-config" // Name of related BackupConfig
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 )
 
-// Finalizers ensure proper cleanup of resources
 const (
-	BackupConfigFinalizer     = OperatorDomain + "/backupconfig-finalizer"     // BackupConfig finalizer
-	ResticRepositoryFinalizer = OperatorDomain + "/resticrepository-finalizer" // ResticRepository finalizer
-	ResticBackupFinalizer     = OperatorDomain + "/resticbackup-finalizer"     // ResticBackup finalizer
-	ResticRestoreFinalizer    = OperatorDomain + "/resticrestore-finalizer"    // ResticRestore finalizer
-	PVCRestoreFinalizer       = OperatorDomain + "/pvc-restore-in-progress"    // PVC finalizer during restore
-	WorkloadFinalizer         = OperatorDomain + "/workload-finalizer"         // Workload finalizer
+	LabelPVCName      = v1.OperatorDomain + "/pvc-name"      // Name of related PVC
+	LabelBackupConfig = v1.OperatorDomain + "/backup-config" // Name of related BackupConfig
 )
 
-// Annotations for resource state and operations
 const (
-	// Operation triggers
-	AnnotationManualBackup  = OperatorDomain + "/manual-backup"  // Trigger manual backup
-	AnnotationManualRestore = OperatorDomain + "/manual-restore" // Trigger manual restore
-
-	// State tracking
-	AnnotationDeletionState    = OperatorDomain + "/deletion-state"     // Track deletion progress
-	AnnotationOriginalReplicas = OperatorDomain + "/original-replicas"  // Store replica counts
-	AnnotationDeleteResticData = OperatorDomain + "/delete-restic-data" // Whether to delete restic data on backup deletion
+	BackupConfigFinalizer     = v1.OperatorDomain + "/backupconfig-finalizer"     // BackupConfig finalizer
+	ResticRepositoryFinalizer = v1.OperatorDomain + "/resticrepository-finalizer" // ResticRepository finalizer
+	ResticBackupFinalizer     = v1.OperatorDomain + "/resticbackup-finalizer"     // ResticBackup finalizer
+	ResticRestoreFinalizer    = v1.OperatorDomain + "/resticrestore-finalizer"    // ResticRestore finalizer
+	PVCRestoreFinalizer       = v1.OperatorDomain + "/pvc-restore-in-progress"    // PVC finalizer during restore
+	WorkloadFinalizer         = v1.OperatorDomain + "/workload-finalizer"         // Workload finalizer
 )
 
-// Timeouts and intervals
 const (
-	DefaultRequeueInterval = 30 * time.Second // Default requeue on error
-	// Additional requeue intervals
+	AnnotationManualBackup  = v1.OperatorDomain + "/manual-backup"  // Trigger manual backup
+	AnnotationManualRestore = v1.OperatorDomain + "/manual-restore" // Trigger manual restore
+
+	AnnotationOriginalReplicas = v1.OperatorDomain + "/original-replicas"  // Store replica counts
+	AnnotationDeleteResticData = v1.OperatorDomain + "/delete-restic-data" // Whether to delete restic data on backup deletion
+)
+
+const (
+	DefaultRequeueInterval    = 30 * time.Second
 	FailedRequeueInterval     = 5 * time.Minute // Requeue interval after a failed operation
 	RepositoryRequeueInterval = 1 * time.Hour   // Requeue interval for repository maintenance or long waits
-)
-
-// Resource states
-const (
-	// Phase states
-	PhaseUnknown   = ""
-	PhasePending   = "Pending"
-	PhaseRunning   = "Running"
-	PhaseCompleted = "Completed"
-	PhaseFailed    = "Failed"
-
-	// Deletion states
-	DeletionStateCleanup         = "cleanup"          // Resource is cleaning up dependencies
-	DeletionStateRemoveFinalizer = "remove-finalizer" // Resource is ready for finalizer removal
-
-	// Restore types
-	RestoreTypeManual    = "manual"    // Manual restore operation
-	RestoreTypeAutomated = "automated" // Automated restore operation
 )

@@ -16,17 +16,9 @@ The operator uses four primary CRDs to manage backup and restore operations.
 
 These fields are displayed as columns in the `kubectl get backupconfigs` output.
 
-| Column            | Type    | Description                                                 |
-| ----------------- | ------- | ----------------------------------------------------------- |
-| `PVCs`            | integer | The number of PVCs currently managed by this configuration. |
-| `Targets`         | integer | The number of backup targets (repositories) configured.     |
-| `Backup Success`  | integer | The total number of successful backup jobs.                 |
-| `Backup Running`  | integer | The number of currently running backup jobs.                |
-| `Backup Failed`   | integer | The total number of failed backup jobs.                     |
-| `Restore Success` | integer | The total number of successful restore jobs.                |
-| `Restore Running` | integer | The number of currently running restore jobs.               |
-| `Restore Failed`  | integer | The total number of failed restore jobs.                    |
-| `Age`             | date    | The age of the `BackupConfig` resource.                     |
+| Column | Type | Description                             |
+| ------ | ---- | --------------------------------------- |
+| `Age`  | date | The age of the `BackupConfig` resource. |
 
 #### Spec Details (`kubectl describe`)
 
@@ -42,14 +34,9 @@ These fields define the desired state of the `BackupConfig`.
 
 These fields represent the observed state of the `BackupConfig`.
 
-| Field                | Type                   | Description                                                                        |
-| -------------------- | ---------------------- | ---------------------------------------------------------------------------------- |
-| `managedPVCs`        | `[]string`             | A list of PVCs currently being managed and backed up by this configuration.        |
-| `targets`            | `[]BackupTargetStatus` | Status for each individual backup target, including `lastBackup` and `nextBackup`. |
-| `backupJobs`         | `JobStatistics`        | Aggregated statistics about the backup jobs (successful, running, failed, etc.).   |
-| `restoreJobs`        | `JobStatistics`        | Aggregated statistics about the restore jobs.                                      |
-| `lastRetentionCheck` | `metav1.Time`          | Timestamp of the last time the retention policy was applied.                       |
-| `conditions`         | `[]metav1.Condition`   | The observed conditions of the `BackupConfig` resource.                            |
+| Field        | Type                 | Description                                             |
+| ------------ | -------------------- | ------------------------------------------------------- |
+| `conditions` | `[]metav1.Condition` | The observed conditions of the `BackupConfig` resource. |
 
 ---
 
@@ -61,13 +48,11 @@ These fields represent the observed state of the `BackupConfig`.
 
 #### Primary Fields (`kubectl get`)
 
-| Column       | Type    | Description                                                                        |
-| ------------ | ------- | ---------------------------------------------------------------------------------- |
-| `Repository` | string  | The URL of the Restic repository.                                                  |
-| `Phase`      | string  | The current lifecycle phase of the repository (`Initializing`, `Ready`, `Failed`). |
-| `Snapshots`  | integer | The total number of snapshots in the repository.                                   |
-| `Size`       | string  | The total size of the repository.                                                  |
-| `Age`        | date    | The age of the `ResticRepository` resource.                                        |
+| Column       | Type   | Description                                                                        |
+| ------------ | ------ | ---------------------------------------------------------------------------------- |
+| `Repository` | string | The URL of the Restic repository.                                                  |
+| `Phase`      | string | The current lifecycle phase of the repository (`Initializing`, `Ready`, `Failed`). |
+| `Age`        | date   | The age of the `ResticRepository` resource.                                        |
 
 #### Spec Details (`kubectl describe`)
 
@@ -81,13 +66,11 @@ These fields represent the observed state of the `BackupConfig`.
 
 #### Status Details (`kubectl describe`)
 
-| Field         | Type                 | Description                                                                                   |
-| ------------- | -------------------- | --------------------------------------------------------------------------------------------- |
-| `phase`       | `string`             | The current lifecycle phase of the repository (`Unknown`, `Initializing`, `Ready`, `Failed`). |
-| `lastChecked` | `metav1.Time`        | Timestamp of the last successful repository integrity check (`restic check`).                 |
-| `stats`       | `RepositoryStats`    | Statistics about the repository, such as total size and snapshot count.                       |
-| `error`       | `string`             | A detailed error message if the repository is in a `Failed` state.                            |
-| `conditions`  | `[]metav1.Condition` | The observed conditions of the `ResticRepository` resource.                                   |
+| Field        | Type                 | Description                                                                                   |
+| ------------ | -------------------- | --------------------------------------------------------------------------------------------- |
+| `phase`      | `string`             | The current lifecycle phase of the repository (`Unknown`, `Initializing`, `Ready`, `Failed`). |
+| `error`      | `string`             | A detailed error message if the repository is in a `Failed` state.                            |
+| `conditions` | `[]metav1.Condition` | The observed conditions of the `ResticRepository` resource.                                   |
 
 ---
 
@@ -105,9 +88,6 @@ These fields represent the observed state of the `BackupConfig`.
 | `PVC`         | string | The name of the PVC that was backed up.                                                  |
 | `Phase`       | string | The current lifecycle phase of the backup (`Pending`, `Running`, `Completed`, `Failed`). |
 | `Snapshot ID` | string | The unique ID of the snapshot within the Restic repository.                              |
-| `Size`        | string | The size of the backup data.                                                             |
-| `Repository`  | string | The name of the `ResticRepository` CRD where this backup is stored.                      |
-| `Duration`    | string | The total time taken for the backup job to complete.                                     |
 | `Age`         | date   | The age of the `ResticBackup` resource.                                                  |
 
 #### Spec Details (`kubectl describe`)
@@ -128,10 +108,7 @@ These fields represent the observed state of the `BackupConfig`.
 | `phase`          | `string`             | The current lifecycle phase of the backup (`Pending`, `Running`, `Completed`, `Failed`). |
 | `startTime`      | `metav1.Time`        | Timestamp of when the backup job started.                                                |
 | `completionTime` | `metav1.Time`        | Timestamp of when the backup job finished.                                               |
-| `size`           | `int64`              | The size of the backup data in bytes.                                                    |
-| `lastVerified`   | `metav1.Time`        | Timestamp of the last time this snapshot's existence was verified.                       |
 | `error`          | `string`             | A detailed error message if the backup is in a `Failed` state.                           |
-| `duration`       | `string`             | The total time taken for the backup job to complete, in a human-readable format.         |
 | `conditions`     | `[]metav1.Condition` | The observed conditions of the `ResticBackup` resource.                                  |
 
 ---
@@ -171,7 +148,6 @@ These fields represent the observed state of the `BackupConfig`.
 | `completionTime` | `metav1.Time`        | Timestamp of when the restore job finished.                                               |
 | `error`          | `string`             | A detailed error message if the restore is in a `Failed` state.                           |
 | `conditions`     | `[]metav1.Condition` | The observed conditions of the `ResticRestore` resource.                                  |
-| `restoredSize`   | `int64`              | The total size of the data restored in bytes.                                             |
 
 ---
 
@@ -464,8 +440,6 @@ For a complete, commented example of a `BackupConfig` resource, please see the [
 ---
 
 ## Additional Notes
-
-- Size fields in status (e.g., `ResticBackup.status.size`, `ResticRepository.status.stats.totalSize`) are expressed in bytes. The corresponding `kubectl get` columns render a human-readable string (e.g., GiB).
 
 - Manual backup annotation naming: when `backup.autorestore.com/manual-backup` is set to `"true"` or `"now"`, the operator generates a name in the form `manual-<pvc-name>-<yyyyMMdd-HHmmss>`.
 
