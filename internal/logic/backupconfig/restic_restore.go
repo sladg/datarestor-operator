@@ -5,48 +5,36 @@ import (
 	"fmt"
 	"time"
 
-	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
-	"github.com/sladg/autorestore-backup-operator/internal/constants"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
+	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // createRestoreJob creates a new ResticRestore resource.
-func createResticRestore(ctx context.Context, deps *utils.Dependencies, backupConfig *backupv1alpha1.BackupConfig, pvc *corev1.PersistentVolumeClaim) error {
-	// For auto-restore, we need to find the appropriate target.
-	// This logic assumes the first target is the one to restore from, which might need refinement.
-	if len(backupConfig.Spec.BackupTargets) == 0 {
-		return fmt.Errorf("no targets defined in BackupConfig %s for auto-restore", backupConfig.Name)
-	}
-	target := backupConfig.Spec.BackupTargets[0]
-
+func createResticRestore(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, repo *v1.ResticRepository) error {
 	// Create PVC reference
-	pvcRef := backupv1alpha1.PersistentVolumeClaimRef{
+	pvcRef := v1.PersistentVolumeClaimRef{
 		Name:      pvc.Name,
 		Namespace: pvc.Namespace,
 	}
 
-	restore := &backupv1alpha1.ResticRestore{
+	restore := &v1.ResticRestore{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("restore-%s-%s-%d", backupConfig.Name, pvc.Name, time.Now().Unix()),
 			Namespace: pvc.Namespace,
 			Labels: map[string]string{
-				constants.LabelPVCBackup: backupConfig.Name,
-				constants.LabelPVC:       pvc.Name,
+				constants.LabelPVCName:      pvc.Name,
+				constants.LabelBackupConfig: backupConfig.Name,
 			},
 		},
-		Spec: backupv1alpha1.ResticRestoreSpec{
+		Spec: v1.ResticRestoreSpec{
 			Name:      fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
-			Type:      backupv1alpha1.RestoreTypeAutomated,
+			Type:      v1.RestoreTypeAutomated,
 			TargetPVC: pvcRef,
-			Restic: backupv1alpha1.ResticRepositorySpec{
-				Target: target.Restic.Target,
-				Env:    target.Restic.Env,
-				Args:   target.Restic.Args,
-				Image:  target.Restic.Image,
-			},
+			Restic:    repo.Spec,
 		},
 	}
 
@@ -60,37 +48,27 @@ func createResticRestore(ctx context.Context, deps *utils.Dependencies, backupCo
 }
 
 // createManualRestoreJob creates a new manual ResticRestore resource.
-func createResticRestoreWithID(ctx context.Context, deps *utils.Dependencies, backupConfig *backupv1alpha1.BackupConfig, pvc *corev1.PersistentVolumeClaim, backupID string) error {
-	if len(backupConfig.Spec.BackupTargets) == 0 {
-		return fmt.Errorf("no targets defined in BackupConfig %s for restore", backupConfig.Name)
-	}
-	target := backupConfig.Spec.BackupTargets[0]
-
+func createResticRestoreWithID(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, backupID string, repo *v1.ResticRepository) error {
 	// Create PVC reference
-	pvcRef := backupv1alpha1.PersistentVolumeClaimRef{
+	pvcRef := v1.PersistentVolumeClaimRef{
 		Name:      pvc.Name,
 		Namespace: pvc.Namespace,
 	}
 
-	restore := &backupv1alpha1.ResticRestore{
+	restore := &v1.ResticRestore{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("manual-restore-%s-%s-%s", backupConfig.Name, pvc.Name, backupID),
 			Namespace: pvc.Namespace,
 			Labels: map[string]string{
-				constants.LabelPVCBackup: backupConfig.Name,
-				constants.LabelPVC:       pvc.Name,
+				constants.LabelPVCName:      pvc.Name,
+				constants.LabelBackupConfig: backupConfig.Name,
 			},
 		},
-		Spec: backupv1alpha1.ResticRestoreSpec{
-			Name:      fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
-			Type:      backupv1alpha1.RestoreTypeManual,
-			TargetPVC: pvcRef,
-			Restic: backupv1alpha1.ResticRepositorySpec{
-				Target: target.Restic.Target,
-				Env:    target.Restic.Env,
-				Args:   target.Restic.Args,
-				Image:  target.Restic.Image,
-			},
+		Spec: v1.ResticRestoreSpec{
+			Name:       fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
+			Type:       v1.RestoreTypeManual,
+			TargetPVC:  pvcRef,
+			Restic:     repo.Spec,
 			SnapshotID: backupID,
 		},
 	}

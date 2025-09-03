@@ -1,4 +1,4 @@
-module github.com/sladg/autorestore-backup-operator
+module github.com/sladg/datarestor-operator
 
 go 1.24.0
 

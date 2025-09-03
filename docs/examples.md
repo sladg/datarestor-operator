@@ -7,7 +7,7 @@ This document focuses on the recommended usage pattern: define `BackupConfig` an
 Below is a complete example of a `BackupConfig` resource that demonstrates common usage patterns.
 
 ```yaml
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: BackupConfig
 metadata:
   name: homelab-backups
@@ -112,7 +112,7 @@ spec:
 ### Trigger backups for all PVCs managed by a BackupConfig
 
 ```yaml
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: BackupConfig
 metadata:
   name: homelab-backups

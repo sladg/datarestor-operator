@@ -7,10 +7,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	v1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
-	"github.com/sladg/autorestore-backup-operator/internal/constants"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
-	logic "github.com/sladg/autorestore-backup-operator/internal/logic/resticbackup"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
+	"github.com/sladg/datarestor-operator/internal/controller/utils"
+	logic "github.com/sladg/datarestor-operator/internal/logic/resticbackup"
 )
 
 // ResticBackupReconciler reconciles a ResticBackup object
@@ -25,9 +25,9 @@ func NewResticBackupReconciler(deps *utils.Dependencies) *ResticBackupReconciler
 	}
 }
 
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticbackups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticbackups/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticbackups/finalizers,verbs=update
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
 

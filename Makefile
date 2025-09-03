@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= kind.local/autorestore-backup-operator:latest
+IMG ?= kind.local/datarestor-operator:latest
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -134,10 +134,10 @@ PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name autorestore-backup-operator-builder
-	$(CONTAINER_TOOL) buildx use autorestore-backup-operator-builder
+	- $(CONTAINER_TOOL) buildx create --name datarestor-operator-builder
+	$(CONTAINER_TOOL) buildx use datarestor-operator-builder
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm autorestore-backup-operator-builder
+	- $(CONTAINER_TOOL) buildx rm datarestor-operator-builder
 	rm Dockerfile.cross
 
 .PHONY: build-installer
@@ -168,9 +168,9 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 
 .PHONY: deploy-restart
 deploy-restart: deploy ## Deploy controller and restart the operator pod.
-	kubectl rollout restart deployment/autorestore-backup-operator-controller-manager -n autorestore-backup-operator-system
+	kubectl rollout restart deployment/datarestor-operator-controller-manager -n datarestor-operator-system
 	@echo "Operator deployment restarted, waiting for rollout to complete..."
-	kubectl rollout status deployment/autorestore-backup-operator-controller-manager -n autorestore-backup-operator-system
+	kubectl rollout status deployment/datarestor-operator-controller-manager -n datarestor-operator-system
 	@echo "Operator restarted successfully!"
 
 .PHONY: undeploy

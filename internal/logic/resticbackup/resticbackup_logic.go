@@ -2,54 +2,38 @@ package logic
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
-	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
-	"github.com/sladg/autorestore-backup-operator/internal/constants"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
-	appsv1 "k8s.io/api/apps/v1"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
+	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// workloadInfo is used to store original replica counts for scaling.
-type workloadInfo struct {
-	Kind     string `json:"kind"`
-	Name     string `json:"name"`
-	Replicas int32  `json:"replicas"`
-}
-
 // HandleBackupPending handles the logic when a ResticBackup is in the Pending phase.
-func HandleBackupPending(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup, stopPods bool) (ctrl.Result, error) {
+func HandleBackupPending(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup, stopPods bool) (ctrl.Result, error) {
 	log := deps.Logger.Named("backup")
 	log.Info("Handling pending backup")
 
 	// 1. Add finalizer
-	if !controllerutil.ContainsFinalizer(backup, constants.ResticBackupFinalizer) {
-		controllerutil.AddFinalizer(backup, constants.ResticBackupFinalizer)
-		if err := deps.Client.Update(ctx, backup); err != nil {
-			log.Errorw("Failed to add finalizer", "error", err)
-			return ctrl.Result{}, err
-		}
+	if err := utils.AddFinalizer(ctx, deps, backup, constants.ResticBackupFinalizer); err != nil {
+		log.Errorw("Failed to add finalizer", "error", err)
+		return ctrl.Result{}, err
 	}
 
 	// 2. Stop pods if requested
 	if stopPods {
-		pvc := &corev1.PersistentVolumeClaim{}
-		if err := deps.Client.Get(ctx, types.NamespacedName{Name: backup.Spec.PVCRef.Name, Namespace: backup.Namespace}, pvc); err != nil {
-			log.Errorw("Failed to get PVC for stopping pods", "pvc", backup.Spec.PVCRef.Name, "error", err)
+		pvc, err := utils.GetResource[corev1.PersistentVolumeClaim](ctx, deps.Client, backup.Namespace, backup.Spec.SourcePVC.Name, log)
+		if err != nil {
 			return ctrl.Result{}, err
 		}
-		if err := storeOriginalReplicaCounts(ctx, deps, backup, pvc); err != nil {
-			log.Errorw("Failed to store original replica counts", "error", err)
+		if err := utils.ManageWorkloadScaleForPVC(ctx, deps, pvc, backup, true); err != nil {
+			log.Errorw("Failed to scale down workloads", "error", err)
 			return ctrl.Result{}, err
 		}
 	}
@@ -62,9 +46,9 @@ func HandleBackupPending(ctx context.Context, deps *utils.Dependencies, backup *
 	}
 
 	// Check repository is ready
-	if repo.Status.Phase != string(backupv1alpha1.PhaseReady) {
+	if repo.Status.Phase != v1.PhaseCompleted {
 		log.Debug("Repository not ready, requeueing")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
 	// Create the backup job
@@ -75,23 +59,22 @@ func HandleBackupPending(ctx context.Context, deps *utils.Dependencies, backup *
 	}
 
 	// 5. Update status to Running
-	return updateBackupStatus(ctx, deps, backup, backupv1alpha1.PhaseRunning, metav1.Now(), job.Name)
+	return updateBackupStatus(ctx, deps, backup, v1.PhaseRunning, metav1.Now(), job.Name)
 }
 
 // HandleBackupRunning handles the logic when a ResticBackup is in the Running phase.
-func HandleBackupRunning(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup) (ctrl.Result, error) {
+func HandleBackupRunning(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
 	log := deps.Logger.Named("backup-running")
 	log.Info("Handling running backup")
 
 	// 1. Get the Kubernetes Job
-	job := &batchv1.Job{}
 	jobName := backup.Status.Job.JobRef.Name
-	if err := deps.Client.Get(ctx, types.NamespacedName{Name: jobName, Namespace: backup.Namespace}, job); err != nil {
+	job, err := utils.GetResource[batchv1.Job](ctx, deps.Client, backup.Namespace, jobName, log)
+	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Errorw("Backup job not found, assuming failure and moving to Failed phase", "jobName", jobName, "error", err)
-			return updateBackupStatus(ctx, deps, backup, backupv1alpha1.PhaseFailed, metav1.Now(), jobName)
+			return updateBackupStatus(ctx, deps, backup, v1.PhaseFailed, metav1.Now(), jobName)
 		}
-		log.Errorw("Failed to get backup job", "error", err)
 		return ctrl.Result{}, err
 	}
 
@@ -100,38 +83,87 @@ func HandleBackupRunning(ctx context.Context, deps *utils.Dependencies, backup *
 }
 
 // HandleBackupCompleted handles the logic when a ResticBackup is in the Completed phase.
-func HandleBackupCompleted(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup) (ctrl.Result, error) {
+func HandleBackupCompleted(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
 	log := deps.Logger.Named("backup-completed")
-
 	log.Info("Handling completed backup")
 
+	// Clean up the job since it's completed successfully
+	jobName := backup.Status.Job.JobRef.Name
+	job, err := utils.GetResource[batchv1.Job](ctx, deps.Client, backup.Spec.SourcePVC.Namespace, jobName, log)
+	if err == nil { // Job exists, so delete it
+		if err := deps.Client.Delete(ctx, job); err != nil {
+			log.Errorw("Failed to clean up completed backup job", "error", err)
+			// Don't fail the backup just because we couldn't clean up
+		} else {
+			log.Info("Successfully cleaned up completed backup job")
+		}
+	} else if !errors.IsNotFound(err) {
+		// Error already logged by GetResource
+	}
+
 	// Restore workloads if they were scaled down
-	if err := restoreOriginalReplicaCounts(ctx, deps, backup); err != nil {
-		log.Errorw("Failed to restore original replica counts on completion", "error", err)
-		// Don't requeue, just log. The backup is complete.
+	pvc, err := utils.GetResource[corev1.PersistentVolumeClaim](ctx, deps.Client, backup.Namespace, backup.Spec.SourcePVC.Name, log)
+	if err != nil {
+		// Error logged by GetResource, nothing more to do
+	} else {
+		if err := utils.ManageWorkloadScaleForPVC(ctx, deps, pvc, backup, false); err != nil {
+			log.Errorw("Failed to scale up workloads on completion", "error", err)
+			// Don't requeue, just log. The backup is complete.
+		}
 	}
 
 	return ctrl.Result{}, nil
 }
 
 // HandleBackupFailed handles the logic when a ResticBackup is in the Failed phase.
-func HandleBackupFailed(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup) (ctrl.Result, error) {
+func HandleBackupFailed(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
 	log := deps.Logger.Named("backup-failed")
 	log.Info("Handling failed backup")
 
+	// Get the failed job to extract logs
+	jobName := backup.Status.Job.JobRef.Name
+	job, err := utils.GetResource[batchv1.Job](ctx, deps.Client, backup.Spec.SourcePVC.Namespace, jobName, log)
+	if err == nil { // Job exists
+		// Attempt to get logs from the failed pod for better error reporting
+		podLogs, logErr := utils.GetJobLogs(ctx, deps, job)
+		if logErr != nil {
+			log.Errorw("Failed to get logs from failed backup job pod", "error", logErr)
+		}
+		log.Errorw("Backup job failed", "reason", job.Status.Conditions[0].Reason, "message", job.Status.Conditions[0].Message, "logs", podLogs)
+		backup.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", job.Status.Conditions[0].Reason, job.Status.Conditions[0].Message, podLogs)
+
+		// Update status with the log message
+		if err := deps.Client.Status().Update(ctx, backup); err != nil {
+			log.Errorw("Failed to update backup status with failure logs", "error", err)
+		}
+
+		// Clean up the failed job
+		if err := deps.Client.Delete(ctx, job); err != nil {
+			log.Errorw("Failed to clean up failed backup job", "error", err)
+		} else {
+			log.Info("Successfully cleaned up failed backup job")
+		}
+	} else if !errors.IsNotFound(err) {
+		// Error already logged by GetResource
+	}
+
 	// Restore workloads if they were scaled down
-	if err := restoreOriginalReplicaCounts(ctx, deps, backup); err != nil {
-		log.Errorw("Failed to restore original replica counts on failure", "error", err)
-		// Don't requeue, just log. The backup has failed.
+	pvc, err := utils.GetResource[corev1.PersistentVolumeClaim](ctx, deps.Client, backup.Namespace, backup.Spec.SourcePVC.Name, log)
+	if err != nil {
+		// Error logged by GetResource, nothing more to do
+	} else {
+		if err := utils.ManageWorkloadScaleForPVC(ctx, deps, pvc, backup, false); err != nil {
+			log.Errorw("Failed to scale up workloads on failure", "error", err)
+			// Don't requeue, just log. The backup has failed.
+		}
 	}
 
 	return ctrl.Result{}, nil
 }
 
 // GetRepositoryForBackup retrieves the ResticRepository for a given ResticBackup.
-func GetRepositoryForBackup(ctx context.Context, c client.Client, backup *backupv1alpha1.ResticBackup) (*backupv1alpha1.ResticRepository, error) {
-	repo := &backupv1alpha1.ResticRepository{}
-	err := c.Get(ctx, types.NamespacedName{Name: backup.Spec.RepositoryRef.Name, Namespace: backup.Namespace}, repo)
+func GetRepositoryForBackup(ctx context.Context, c client.Client, backup *v1.ResticBackup) (*v1.ResticRepository, error) {
+	repo, err := utils.GetResource[v1.ResticRepository](ctx, c, backup.Namespace, backup.Spec.Repository.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -139,55 +171,15 @@ func GetRepositoryForBackup(ctx context.Context, c client.Client, backup *backup
 }
 
 // createBackupJob creates a new backup job.
-func createBackupJob(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup, repo *backupv1alpha1.ResticRepository) (*batchv1.Job, error) {
+func createBackupJob(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup, repo *v1.ResticRepository) (*batchv1.Job, error) {
 	log := deps.Logger.Named("create-backup-job")
-	jobName := fmt.Sprintf("backup-%s", backup.Name)
-	pvcName := backup.Spec.PVCRef.Name
 
-	// Define the backup command
-	command, args, err := utils.BuildBackupJobCommand(jobName, backup.Spec.Tags)
+	jobSpec, err := utils.BuildBackupJobSpec(backup)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build backup command: %w", err)
+		return nil, err
 	}
 
-	// Prepare volume mounts for PVC
-	volumeMounts := []corev1.VolumeMount{
-		{
-			Name:      "data",
-			MountPath: "/data",
-			ReadOnly:  true, // Backup is read-only
-		},
-	}
-
-	// Prepare volumes
-	volumes := []corev1.Volume{
-		{
-			Name: "data",
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvcName,
-				},
-			},
-		},
-	}
-
-	// Build job spec
-	jobSpec := utils.ResticJobSpec{
-		JobName:      jobName,
-		Namespace:    backup.Namespace,
-		JobType:      "backup",
-		Command:      command,
-		Args:         args,
-		Repository:   repo.Spec.Repository,
-		Password:     repo.Spec.Password,
-		Image:        repo.Spec.Image,
-		Env:          repo.Spec.Env,
-		VolumeMounts: volumeMounts,
-		Volumes:      volumes,
-		Owner:        backup,
-	}
-
-	job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec)
+	job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec, backup)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create restic job: %w", err)
 	}
@@ -197,42 +189,39 @@ func createBackupJob(ctx context.Context, deps *utils.Dependencies, backup *back
 }
 
 // processBackupJobStatus checks the status of the Kubernetes Job and updates the ResticBackup status.
-func processBackupJobStatus(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup, job *batchv1.Job) (ctrl.Result, error) {
+func processBackupJobStatus(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup, job *batchv1.Job) (ctrl.Result, error) {
 	log := deps.Logger.Named("process-backup-job-status")
-	if job.Status.Succeeded > 0 {
-		log.Info("Backup job succeeded")
-		_, err := updateBackupStatus(ctx, deps, backup, backupv1alpha1.PhaseCompleted, metav1.Now(), job.Name)
+	finished, succeeded := utils.IsJobFinished(job)
+
+	if !finished {
+		log.Debug("Backup job is still running")
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	}
+
+	if succeeded {
+		log.Info("Backup job succeeded. Moving to Completed phase.")
+		_, err := updateBackupStatus(ctx, deps, backup, v1.PhaseCompleted, metav1.Now(), job.Name)
 		return ctrl.Result{}, err
 	}
 
-	if job.Status.Failed > 0 {
-		// Attempt to get logs from the failed pod for better error reporting
-		podLogs, logErr := utils.GetPodLogs(ctx, deps, job.Namespace, job.Name)
-		if logErr != nil {
-			log.Errorw("Failed to get logs from failed backup job pod", "error", logErr)
-		}
-		log.Errorw("Backup job failed", "reason", job.Status.Conditions[0].Reason, "message", job.Status.Conditions[0].Message, "logs", podLogs)
-		backup.Status.Message = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", job.Status.Conditions[0].Reason, job.Status.Conditions[0].Message, podLogs)
-		_, err := updateBackupStatus(ctx, deps, backup, backupv1alpha1.PhaseFailed, metav1.Now(), job.Name)
-		return ctrl.Result{}, err
-	}
-
-	log.Debug("Backup job is still running")
-	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	// Job failed
+	log.Errorw("Backup job failed. Moving to Failed phase.")
+	_, err := updateBackupStatus(ctx, deps, backup, v1.PhaseFailed, metav1.Now(), job.Name)
+	return ctrl.Result{}, err
 }
 
 // updateBackupStatus updates the status of the ResticBackup resource.
-func updateBackupStatus(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup, phase backupv1alpha1.Phase, transitionTime metav1.Time, jobName string) (ctrl.Result, error) {
+func updateBackupStatus(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup, phase v1.Phase, transitionTime metav1.Time, jobName string) (ctrl.Result, error) {
 	backup.Status.Phase = phase
 	// Message is set in processBackupJobStatus for failures
-	if phase != backupv1alpha1.PhaseFailed {
-		backup.Status.Message = "" // Clear previous messages
+	if phase != v1.PhaseFailed {
+		backup.Status.Error = "" // Clear previous messages
 	}
 
 	if jobName != "" {
 		backup.Status.Job.JobRef = &corev1.LocalObjectReference{Name: jobName}
 	}
-	if backup.Status.CompletionTime == nil && (phase == backupv1alpha1.PhaseCompleted || phase == backupv1alpha1.PhaseFailed) {
+	if backup.Status.CompletionTime == nil && (phase == v1.PhaseCompleted || phase == v1.PhaseFailed) {
 		backup.Status.CompletionTime = &transitionTime
 	}
 
@@ -240,155 +229,23 @@ func updateBackupStatus(ctx context.Context, deps *utils.Dependencies, backup *b
 		return ctrl.Result{}, err
 	}
 
-	requeueTime := constants.DefaultRequeueInterval
-	if phase == backupv1alpha1.PhaseFailed {
-		requeueTime = 5 * time.Minute
+	if phase == v1.PhaseFailed {
+		return ctrl.Result{RequeueAfter: constants.FailedRequeueInterval}, nil
 	}
-	if phase == backupv1alpha1.PhaseCompleted {
+	if phase == v1.PhaseCompleted {
 		return ctrl.Result{}, nil
 	}
-	return ctrl.Result{RequeueAfter: requeueTime}, nil
-}
-
-// storeOriginalReplicaCounts annotates the ResticBackup with the original replica counts of the scaled workloads.
-func storeOriginalReplicaCounts(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup, pvc *corev1.PersistentVolumeClaim) error {
-	log := deps.Logger.Named("store-original-replicas")
-	workloads, err := utils.ScaleWorkloads(ctx, deps.Client, pvc, 0, log)
-	if err != nil {
-		return fmt.Errorf("failed to scale down workloads: %w", err)
-	}
-
-	if len(workloads) == 0 {
-		log.Info("No workloads found for PVC, skipping replica count storage")
-		return nil
-	}
-
-	originalReplicas := make(map[string]workloadInfo)
-	for _, workload := range workloads {
-		switch w := workload.(type) {
-		case *appsv1.Deployment:
-			originalReplicas[string(w.UID)] = workloadInfo{Kind: "Deployment", Name: w.Name, Replicas: *w.Spec.Replicas}
-		case *appsv1.StatefulSet:
-			originalReplicas[string(w.UID)] = workloadInfo{Kind: "StatefulSet", Name: w.Name, Replicas: *w.Spec.Replicas}
-		}
-	}
-
-	// Store in annotation
-	jsonData, err := json.Marshal(originalReplicas)
-	if err != nil {
-		return fmt.Errorf("failed to marshal original replica counts: %w", err)
-	}
-
-	if backup.Annotations == nil {
-		backup.Annotations = make(map[string]string)
-	}
-	backup.Annotations[constants.AnnotationOriginalReplicas] = string(jsonData)
-
-	if err := deps.Client.Update(ctx, backup); err != nil {
-		return fmt.Errorf("failed to update backup with original replica annotation: %w", err)
-	}
-
-	// Wait for pods to be terminated
-	return checkPodsTerminated(ctx, deps, pvc)
-}
-
-// restoreOriginalReplicaCounts restores the original replica counts of workloads.
-func restoreOriginalReplicaCounts(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup) error {
-	log := deps.Logger.Named("restore-original-replicas")
-	jsonData, ok := backup.Annotations[constants.AnnotationOriginalReplicas]
-	if !ok {
-		log.Info("No original replica count annotation found, nothing to restore")
-		return nil
-	}
-
-	var originalReplicas map[string]workloadInfo
-	if err := json.Unmarshal([]byte(jsonData), &originalReplicas); err != nil {
-		return fmt.Errorf("failed to unmarshal original replica counts: %w", err)
-	}
-
-	for _, info := range originalReplicas {
-		var obj client.Object
-		var patchData []byte
-		switch info.Kind {
-		case "Deployment":
-			obj = &appsv1.Deployment{}
-			patchData = []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, info.Replicas))
-		case "StatefulSet":
-			obj = &appsv1.StatefulSet{}
-			patchData = []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, info.Replicas))
-		default:
-			continue
-		}
-
-		if err := deps.Client.Get(ctx, types.NamespacedName{Name: info.Name, Namespace: backup.Namespace}, obj); err != nil {
-			log.Errorw("Failed to get workload for scaling up", "kind", info.Kind, "name", info.Name, "error", err)
-			continue
-		}
-
-		patch := client.RawPatch(types.MergePatchType, patchData)
-
-		if err := deps.Client.Patch(ctx, obj, patch); err != nil {
-			log.Errorw("Failed to restore replica count for workload", "kind", info.Kind, "name", info.Name, "error", err)
-			// Continue trying to restore others
-		} else {
-			log.Infow("Successfully restored replica count for workload", "kind", info.Kind, "name", info.Name, "replicas", info.Replicas)
-		}
-	}
-
-	return nil
-}
-
-// checkPodsTerminated waits for all pods using a PVC to be terminated.
-func checkPodsTerminated(ctx context.Context, deps *utils.Dependencies, pvc *corev1.PersistentVolumeClaim) error {
-	log := deps.Logger.Named("check-pods-terminated")
-	// This is a simplified check. A more robust implementation might use a watcher
-	// or a more sophisticated polling mechanism with backoff.
-	for i := 0; i < 30; i++ { // Poll for a max of 5 minutes (30 * 10s)
-		workloads, err := utils.ScaleWorkloads(ctx, deps.Client, pvc, -1, log) // -1 means don't scale, just find
-		if err != nil {
-			return err
-		}
-
-		allTerminated := true
-		for _, workload := range workloads {
-			switch w := workload.(type) {
-			case *appsv1.Deployment:
-				if w.Status.ReadyReplicas > 0 {
-					allTerminated = false
-					break
-				}
-			case *appsv1.StatefulSet:
-				if w.Status.ReadyReplicas > 0 {
-					allTerminated = false
-					break
-				}
-			}
-		}
-
-		if allTerminated {
-			log.Info("All pods using PVC have been terminated")
-			return nil
-		}
-
-		log.Debug("Waiting for pods to terminate...")
-		time.Sleep(10 * time.Second)
-	}
-
-	return fmt.Errorf("timed out waiting for pods to terminate for PVC %s", pvc.Name)
+	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 }
 
 // getParentBackupConfig retrieves the parent BackupConfig for a ResticBackup
-func getParentBackupConfig(ctx context.Context, backup *backupv1alpha1.ResticBackup) (*backupv1alpha1.BackupConfig, error) {
+func getParentBackupConfig(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (*v1.BackupConfig, error) {
 	backupConfigName := backup.Labels["backup-config"]
 	if backupConfigName == "" {
 		return nil, nil // No error, just no BackupConfig found
 	}
 
-	backupConfig := &backupv1alpha1.BackupConfig{}
-	err := r.Deps.Client.Get(ctx, types.NamespacedName{
-		Name:      backupConfigName,
-		Namespace: backup.Namespace,
-	}, backupConfig)
+	backupConfig, err := utils.GetResource[v1.BackupConfig](ctx, deps.Client, backup.Namespace, backupConfigName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get parent BackupConfig: %w", err)
 	}
@@ -396,19 +253,47 @@ func getParentBackupConfig(ctx context.Context, backup *backupv1alpha1.ResticBac
 	return backupConfig, nil
 }
 
-// handlePendingPhase handles the pending phase of a backup
-func HandlePendingPhase(ctx context.Context, deps *utils.Dependencies, backup *backupv1alpha1.ResticBackup) (ctrl.Result, error) {
+// shouldStopPodsForBackup determines if workloads should be scaled down for a given backup.
+func shouldStopPodsForBackup(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (bool, error) {
 	log := deps.Logger.With("name", backup.Name, "namespace", backup.Namespace)
 
-	// Get parent BackupConfig if it exists
-	backupConfig, err := getParentBackupConfig(ctx, backup)
+	backupConfig, err := getParentBackupConfig(ctx, deps, backup)
 	if err != nil {
 		log.Errorw("Failed to get parent BackupConfig", "error", err)
-		// Continue without stopping pods if we can't get the BackupConfig
-		return HandleBackupPending(ctx, deps, backup, false)
+		// Continue without stopping pods if we can't get the BackupConfig.
+		return false, nil
+	}
+	if backupConfig == nil {
+		return false, nil // No config, so no instruction to stop pods.
 	}
 
-	// Determine if we should stop pods
+	pvc, err := utils.GetResource[corev1.PersistentVolumeClaim](ctx, deps.Client, backup.Spec.SourcePVC.Namespace, backup.Spec.SourcePVC.Name, log)
+	if err != nil {
+		// If we can't get the PVC, we can't check selectors, so don't stop pods.
+		return false, nil
+	}
+
+	matchingSelectors := utils.FindMatchingSelectors(pvc, backupConfig.Spec.Selectors)
+	for _, selector := range matchingSelectors {
+		if selector.StopPods {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// HandlePendingPhase handles the pending phase of a backup
+func HandlePendingPhase(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
+	log := deps.Logger.With("name", backup.Name, "namespace", backup.Namespace)
+
+	stopPods, err := shouldStopPodsForBackup(ctx, deps, backup)
+	if err != nil {
+		// This path is currently not hit as shouldStopPodsForBackup returns nil errors,
+		// but it's good practice for future development.
+		log.Errorw("Failed to determine if pods should be stopped", "error", err)
+		return HandleBackupPending(ctx, deps, backup, false)
+	}
 
 	return HandleBackupPending(ctx, deps, backup, stopPods)
 }

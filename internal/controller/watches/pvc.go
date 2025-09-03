@@ -3,10 +3,9 @@ package watches
 import (
 	"context"
 
-	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -15,62 +14,23 @@ import (
 // pvcToRequests converts a PVC to a list of reconcile requests
 func pvcToRequests(ctx context.Context, c client.Client, pvc *corev1.PersistentVolumeClaim) []reconcile.Request {
 	// List all BackupConfigs in the namespace
-	var backupConfigs backupv1alpha1.BackupConfigList
-	if err := c.List(ctx, &backupConfigs, client.InNamespace(pvc.Namespace)); err != nil {
+	backupConfigList := &v1.BackupConfigList{}
+	selector := utils.SelectorInNamespace(pvc.Namespace)
+	backupConfigs, err := utils.FindMatchingResources[*v1.BackupConfig](ctx, &utils.Dependencies{Client: c}, []v1.Selector{selector}, backupConfigList)
+	if err != nil {
 		return nil
 	}
 
 	var requests []reconcile.Request
-	for _, backupConfig := range backupConfigs.Items {
+	for _, backupConfig := range backupConfigs {
 		// Check if PVC matches any selector
-		for _, selector := range backupConfig.Spec.Selectors {
-			// Check if PVC matches the label selector
-			if selector.LabelSelector != nil {
-				labelSelector, err := metav1.LabelSelectorAsSelector(selector.LabelSelector)
-				if err != nil {
-					continue
-				}
-				if !labelSelector.Matches(labels.Set(pvc.Labels)) {
-					continue
-				}
-			}
-
-			// Check if PVC is in the namespaces list
-			if len(selector.Namespaces) > 0 {
-				found := false
-				for _, ns := range selector.Namespaces {
-					if ns == pvc.Namespace {
-						found = true
-						break
-					}
-				}
-				if !found {
-					continue
-				}
-			}
-
-			// Check if PVC is in the names list
-			if len(selector.Names) > 0 {
-				found := false
-				for _, name := range selector.Names {
-					if name == pvc.Name {
-						found = true
-						break
-					}
-				}
-				if !found {
-					continue
-				}
-			}
-
-			// If we got here, the PVC matches this selector
+		if utils.MatchesAnySelector(pvc, backupConfig.Spec.Selectors) {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: client.ObjectKey{
 					Name:      backupConfig.Name,
 					Namespace: backupConfig.Namespace,
 				},
 			})
-			break // No need to check other selectors for this BackupConfig
 		}
 	}
 

@@ -1,5 +1,5 @@
 # Manual RestoreJob examples for testing
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: RestoreJob
 metadata:
   name: restore-web-app-manual
@@ -22,7 +22,7 @@ spec:
   overwriteExisting: false
 ---
 # RestoreJob with specific backup ID (update this with actual backup ID)
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: RestoreJob
 metadata:
   name: restore-postgres-specific
@@ -46,7 +46,7 @@ spec:
   overwriteExisting: true # Allow overwriting existing data
 ---
 # RestoreJob referencing a BackupJob
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: RestoreJob
 metadata:
   name: restore-from-backupjob

@@ -9,12 +9,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
-	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
-	"github.com/sladg/autorestore-backup-operator/internal/constants"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/watches"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
+	"github.com/sladg/datarestor-operator/internal/controller/utils"
+	"github.com/sladg/datarestor-operator/internal/controller/watches"
 
-	logic "github.com/sladg/autorestore-backup-operator/internal/logic/backupconfig"
+	logic "github.com/sladg/datarestor-operator/internal/logic/backupconfig"
 )
 
 // NewBackupConfigReconciler creates a new BackupConfigReconciler
@@ -31,12 +31,12 @@ type BackupConfigReconciler struct {
 	cronParser cron.Parser
 }
 
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=backupconfigs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=backupconfigs/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=backupconfigs/finalizers,verbs=update
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticrepositories,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticbackups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.autorestore-backup-operator.com,resources=resticrestores,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=backupconfigs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=backupconfigs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=backupconfigs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticrepositories,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticrestores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="apps",resources=deployments;statefulsets,verbs=get;list;watch;update;patch
@@ -55,7 +55,7 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
 
 	// Fetch the BackupConfig instance
-	backupConfig := &backupv1alpha1.BackupConfig{}
+	backupConfig := &v1.BackupConfig{}
 	if err := r.Deps.Client.Get(ctx, req.NamespacedName, backupConfig); err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
@@ -127,8 +127,8 @@ func (r *BackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&backupv1alpha1.BackupConfig{}).
-		Owns(&backupv1alpha1.ResticRepository{}).
+		For(&v1.BackupConfig{}).
+		Owns(&v1.ResticRepository{}).
 		Watches(
 			&corev1.PersistentVolumeClaim{},
 			handler.EnqueueRequestsFromMapFunc(watches.FindObjectsForPVC(mgr.GetClient())),

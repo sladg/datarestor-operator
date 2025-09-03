@@ -16,7 +16,7 @@ Here are the most common manual operations you can perform by annotating your re
 
 ```sh
 # This triggers a backup of 'my-pvc' and names the backup 'pre-upgrade-snapshot'.
-kubectl annotate pvc my-pvc backup.autorestore-backup-operator.com/manual-backup='pre-upgrade-snapshot'
+kubectl annotate pvc my-pvc backup.datarestor-operator.com/manual-backup='pre-upgrade-snapshot'
 ```
 
 #### Triggering a Manual Backup for all PVCs in a BackupConfig
@@ -24,14 +24,14 @@ kubectl annotate pvc my-pvc backup.autorestore-backup-operator.com/manual-backup
 ```sh
 # This triggers backups for all PVCs managed by 'my-backup-config'
 # and names each backup 'my-manual-backup-run'.
-kubectl annotate backupconfig my-backup-config backup.autorestore-backup-operator.com/manual-backup='my-manual-backup-run'
+kubectl annotate backupconfig my-backup-config backup.datarestor-operator.com/manual-backup='my-manual-backup-run'
 ```
 
 #### Triggering a Restore to a PVC
 
 ```sh
 # This triggers a restore to 'my-pvc' from the backup named 'pre-upgrade-snapshot'.
-kubectl annotate pvc my-pvc backup.autorestore-backup-operator.com/restore-from-backup='pre-upgrade-snapshot'
+kubectl annotate pvc my-pvc backup.datarestor-operator.com/restore-from-backup='pre-upgrade-snapshot'
 ```
 
 ---

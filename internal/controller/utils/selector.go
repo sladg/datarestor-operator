@@ -4,8 +4,9 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/sladg/autorestore-backup-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/api/v1alpha1"
 	"go.uber.org/zap"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -81,6 +82,15 @@ func FindMatchingPVCs(ctx context.Context, deps *Dependencies, selector *v1alpha
 	return result, nil
 }
 
+// FindPVCByName finds a PVC by name in a specific namespace
+func FindPVCByName(ctx context.Context, deps *Dependencies, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := deps.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, pvc); err != nil {
+		return nil, err
+	}
+	return pvc, nil
+}
+
 // FindBackupsByRepository finds all ResticBackup resources for a given ResticRepository
 func FindBackupsByRepository(ctx context.Context, deps *Dependencies, namespace, repoName string) ([]v1alpha1.ResticBackup, error) {
 	selector := v1alpha1.Selector{
@@ -135,6 +145,18 @@ func FindRestoresByBackupName(ctx context.Context, deps *Dependencies, namespace
 	return matchingRestores, nil
 }
 
+// FindPodsForJob finds all pods for a given Job
+func FindPodsForJob(ctx context.Context, deps *Dependencies, job *batchv1.Job) (*corev1.PodList, error) {
+	podList := &corev1.PodList{}
+	err := deps.Client.List(ctx, podList, client.InNamespace(job.Namespace), client.MatchingLabels{
+		"controller-uid": string(job.UID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return podList, nil
+}
+
 // MatchesAnySelector checks if the resource matches any of the selectors in the list.
 func MatchesAnySelector(obj client.Object, selectors []v1alpha1.Selector) bool {
 	for _, selector := range selectors {
@@ -143,6 +165,17 @@ func MatchesAnySelector(obj client.Object, selectors []v1alpha1.Selector) bool {
 		}
 	}
 	return false
+}
+
+// FindMatchingSelectors returns all selectors that match the given object.
+func FindMatchingSelectors(obj client.Object, selectors []v1alpha1.Selector) []v1alpha1.Selector {
+	var matchingSelectors []v1alpha1.Selector
+	for _, s := range selectors {
+		if matchesSelector(obj, s) {
+			matchingSelectors = append(matchingSelectors, s)
+		}
+	}
+	return matchingSelectors
 }
 
 // matchesSelector checks if a resource matches a selector

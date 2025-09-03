@@ -39,9 +39,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	backupv1alpha1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
-	"github.com/sladg/autorestore-backup-operator/internal/controller"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
+	backupv1alpha1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/controller"
+	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -203,7 +203,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "a2ab1107.autorestore-backup-operator.com",
+		LeaderElectionID:       "a2ab1107.datarestor-operator.com",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly

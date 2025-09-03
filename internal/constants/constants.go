@@ -3,25 +3,13 @@ package constants
 import "time"
 
 // Domain for the operator
-const OperatorDomain = "backup.autorestore-backup-operator.com"
+const OperatorDomain = "backup.datarestor-operator.com"
 
 // Labels used for resource identification
 const (
 	// Resource identifiers
-	LabelPVCName = OperatorDomain + "/pvc-name" // Name of related PVC
-	LabelJobType = OperatorDomain + "/job-type" // Type of job (backup, restore, repository)
-
-	// Job types
-	JobTypeBackup     = "backup"     // Backup job
-	JobTypeRestore    = "restore"    // Restore job
-	JobTypeRepository = "repository" // Repository maintenance job
-)
-
-// Job name patterns
-const (
-	BackupJobPattern     = "%s-backup-%s"     // {backupName}-backup-{timestamp}
-	RestoreJobPattern    = "%s-restore-%s"    // {restoreName}-restore-{timestamp}
-	RepositoryJobPattern = "%s-repository-%s" // {repoName}-repository-{timestamp}
+	LabelPVCName      = OperatorDomain + "/pvc-name"      // Name of related PVC
+	LabelBackupConfig = OperatorDomain + "/backup-config" // Name of related BackupConfig
 )
 
 // Finalizers ensure proper cleanup of resources
@@ -39,33 +27,19 @@ const (
 	// Operation triggers
 	AnnotationManualBackup  = OperatorDomain + "/manual-backup"  // Trigger manual backup
 	AnnotationManualRestore = OperatorDomain + "/manual-restore" // Trigger manual restore
-	AnnotationRestoreNeeded = OperatorDomain + "/restore-needed" // Mark PVC for restore
-
-	// Operation parameters
-	AnnotationManualBackupName  = OperatorDomain + "/manual-backup-name"  // Name for manual backup
-	AnnotationManualRestoreName = OperatorDomain + "/manual-restore-name" // Name for manual restore
 
 	// State tracking
-	AnnotationDeletionState    = OperatorDomain + "/deletion-state"    // Track deletion progress
-	AnnotationOriginalReplicas = OperatorDomain + "/original-replicas" // Store replica counts
+	AnnotationDeletionState    = OperatorDomain + "/deletion-state"     // Track deletion progress
+	AnnotationOriginalReplicas = OperatorDomain + "/original-replicas"  // Store replica counts
+	AnnotationDeleteResticData = OperatorDomain + "/delete-restic-data" // Whether to delete restic data on backup deletion
 )
 
 // Timeouts and intervals
 const (
-	DefaultRequeueInterval   = 30 * time.Second // Default requeue on error
-	DefaultReconcileInterval = 5 * time.Minute  // Default reconcile interval
-	JobTTLSeconds            = 600              // TTL for completed jobs
-
-	ResticInitTimeout    = 1 * time.Minute  // Repository init timeout
-	ResticBackupTimeout  = 15 * time.Minute // Backup operation timeout
-	ResticRestoreTimeout = 15 * time.Minute // Restore operation timeout
-)
-
-// Default schedules for operations
-const (
-	DefaultRetentionSchedule    = "0 3 * * *" // Daily at 3 AM
-	DefaultMaintenanceSchedule  = "0 2 * * 0" // Weekly on Sunday at 2 AM
-	DefaultVerificationSchedule = "0 1 * * *" // Daily at 1 AM
+	DefaultRequeueInterval = 30 * time.Second // Default requeue on error
+	// Additional requeue intervals
+	FailedRequeueInterval     = 5 * time.Minute // Requeue interval after a failed operation
+	RepositoryRequeueInterval = 1 * time.Hour   // Requeue interval for repository maintenance or long waits
 )
 
 // Resource states

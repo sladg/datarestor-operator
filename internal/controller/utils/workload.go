@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	appsv1 "k8s.io/api/apps/v1"
@@ -10,7 +11,113 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/sladg/datarestor-operator/internal/constants"
 )
+
+// ManageWorkloadScaleForPVC handles scaling workloads up or down for a given PVC.
+// It manages finalizers and annotations on the owner object.
+func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc *corev1.PersistentVolumeClaim, owner client.Object, scaleDown bool) error {
+	log := deps.Logger.Named("workload-scaler").With("pvc", pvc.Name, "namespace", pvc.Namespace)
+
+	workloads, err := ScaleWorkloads(ctx, deps.Client, pvc, -1, log)
+	if err != nil {
+		return fmt.Errorf("failed to find workloads for PVC %s: %w", pvc.Name, err)
+	}
+	if len(workloads) == 0 {
+		log.Info("No workloads found for PVC, skipping scaling")
+		return nil
+	}
+
+	if scaleDown {
+		// Scale Down Logic
+		if err := StoreOriginalReplicasInAnnotation(ctx, deps, owner, workloads); err != nil {
+			return fmt.Errorf("failed to store original replica annotation: %w", err)
+		}
+
+		for _, workload := range workloads {
+			if err := AddFinalizer(ctx, deps, workload, constants.WorkloadFinalizer); err != nil {
+				log.Errorw("Failed to add finalizer to workload", "error", err, "workload", workload.GetName())
+			}
+			patch := []byte(`{"spec":{"replicas":0}}`)
+			if err := deps.Client.Patch(ctx, workload, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				log.Errorw("Failed to scale down workload", "error", err, "workload", workload.GetName())
+			}
+		}
+
+		return checkPodsTerminated(ctx, deps, pvc)
+
+	} else {
+		// Scale Up Logic
+		originalReplicas, err := LoadOriginalReplicasFromAnnotation(owner)
+		if err != nil {
+			return fmt.Errorf("failed to load original replica annotation: %w", err)
+		}
+		if originalReplicas == nil {
+			log.Info("No original replica count annotation found, skipping scale up")
+			return nil
+		}
+
+		for _, wl := range workloads {
+			uid := string(wl.GetUID())
+			info, exists := originalReplicas[uid]
+			if !exists {
+				log.Warnw("Workload was not in the original scale-down list, skipping", "workload", wl.GetName())
+				continue
+			}
+
+			patch := []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, info.Replicas))
+			if err := deps.Client.Patch(ctx, wl, client.RawPatch(types.MergePatchType, patch)); err != nil {
+				log.Errorw("Failed to restore replica count", "workload", wl.GetName(), "error", err)
+				continue
+			}
+			log.Infow("Scaled up workload", "workload", wl.GetName(), "replicas", info.Replicas)
+
+			if err := RemoveFinalizer(ctx, deps, wl, constants.WorkloadFinalizer); err != nil {
+				log.Errorw("Failed to remove finalizer from workload", "error", err, "workload", wl.GetName())
+			}
+		}
+
+		return RemoveOriginalReplicasAnnotation(ctx, deps, owner)
+	}
+}
+
+// checkPodsTerminated waits for all pods using a PVC to be terminated.
+func checkPodsTerminated(ctx context.Context, deps *Dependencies, pvc *corev1.PersistentVolumeClaim) error {
+	log := deps.Logger.Named("check-pods-terminated")
+	for i := 0; i < 30; i++ { // Poll for a max of 5 minutes (30 * 10s)
+		workloads, err := ScaleWorkloads(ctx, deps.Client, pvc, -1, log) // -1 means don't scale, just find
+		if err != nil {
+			return err
+		}
+
+		allTerminated := true
+		for _, workload := range workloads {
+			switch w := workload.(type) {
+			case *appsv1.Deployment:
+				if w.Status.ReadyReplicas > 0 {
+					allTerminated = false
+					break
+				}
+			case *appsv1.StatefulSet:
+				if w.Status.ReadyReplicas > 0 {
+					allTerminated = false
+					break
+				}
+			}
+		}
+
+		if allTerminated {
+			log.Info("All pods using PVC have been terminated")
+			return nil
+		}
+
+		log.Debug("Waiting for pods to terminate...")
+		time.Sleep(10 * time.Second)
+	}
+
+	return fmt.Errorf("timed out waiting for pods to terminate for PVC %s", pvc.Name)
+}
 
 // ScaleWorkloads finds all Deployments and StatefulSets using a given PVC and scales them
 // to the specified replica count. It returns a list of the workloads that were scaled.

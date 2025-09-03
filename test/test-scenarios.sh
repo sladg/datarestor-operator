@@ -162,7 +162,7 @@ run_test_scenario() {
             echo ""
             echo "📋 Next steps:"
             echo "1. Deploy the operator: make deploy"
-            echo "2. Watch operator logs: kubectl logs -n autorestore-backup-operator-system deployment/autorestore-backup-operator-controller-manager -f"
+            echo "2. Watch operator logs: kubectl logs -n datarestor-operator-system deployment/datarestor-operator-controller-manager -f"
             echo "3. Monitor BackupJobs: kubectl get backupjobs -A -w"
             echo "4. Access filebrowser: kubectl port-forward svc/backup-filebrowser 8080:8080"
             echo "5. Check app: kubectl port-forward svc/web-app 8081:80"

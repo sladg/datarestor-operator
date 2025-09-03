@@ -159,7 +159,7 @@ spec:
   restartPolicy: Never
 ---
 # BackupConfig to manage the test PVC
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: BackupConfig
 metadata:
   name: manual-test-backup

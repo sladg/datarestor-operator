@@ -19,10 +19,10 @@ package controller
 import (
 	"context"
 
-	v1 "github.com/sladg/autorestore-backup-operator/api/v1alpha1"
-	"github.com/sladg/autorestore-backup-operator/internal/constants"
-	"github.com/sladg/autorestore-backup-operator/internal/controller/utils"
-	logic "github.com/sladg/autorestore-backup-operator/internal/logic/resticrestore"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
+	"github.com/sladg/datarestor-operator/internal/controller/utils"
+	logic "github.com/sladg/datarestor-operator/internal/logic/resticrestore"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 )

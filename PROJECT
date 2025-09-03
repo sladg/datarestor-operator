@@ -3,19 +3,19 @@
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
 cliVersion: 4.7.1
-domain: autorestore-backup-operator.com
+domain: datarestor-operator.com
 layout:
   - go.kubebuilder.io/v4
-projectName: autorestore-backup-operator
-repo: github.com/sladg/autorestore-backup-operator
+projectName: datarestor-operator
+repo: github.com/sladg/datarestor-operator
 resources:
   - api:
       crdVersion: v1
       namespaced: true
     controller: true
-    domain: autorestore-backup-operator.com
+    domain: datarestor-operator.com
     group: backup
     kind: BackupConfig
-    path: github.com/sladg/autorestore-backup-operator/api/v1alpha1
+    path: github.com/sladg/datarestor-operator/api/v1alpha1
     version: v1alpha1
 version: "3"

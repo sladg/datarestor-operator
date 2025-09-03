@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sladg/autorestore-backup-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,18 +14,25 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// NOTE: These are TEMPORARY stubs used during aggressive cleanup to keep the
-// codebase compiling while complex implementation logic is removed. Replace
-// with real implementations when functionality is re-introduced.
-
-// BuildBackupJobCommand returns placeholder command/args for a restic backup job.
-func BuildBackupJobCommand(_ string, _ []string) ([]string, []string, error) {
-	return []string{"/bin/true"}, []string{}, nil
+// BuildBackupJobCommand returns command/args for a restic backup job.
+func BuildBackupJobCommand(backupName string, customArgs []string) ([]string, []string, error) {
+	command := []string{"restic", "backup"}
+	args := []string{"/data"}
+	if backupName != "" {
+		args = append(args, "--tag", backupName)
+	}
+	args = append(args, customArgs...)
+	return command, args, nil
 }
 
-// BuildRestoreJobCommand returns placeholder command/args for a restic restore job.
-func BuildRestoreJobCommand(_ string) ([]string, []string, error) {
-	return []string{"/bin/true"}, []string{}, nil
+// BuildRestoreJobCommand returns command/args for a restic restore job.
+func BuildRestoreJobCommand(snapshotID string) ([]string, []string, error) {
+	if snapshotID == "" {
+		snapshotID = "latest"
+	}
+	command := []string{"restic", "restore"}
+	args := []string{snapshotID, "--target", "/data"}
+	return command, args, nil
 }
 
 // CreateRestoreJobWithOutput returns placeholder Job and ConfigMap objects.
@@ -53,7 +61,6 @@ type ResticJobSpec struct {
 	Namespace    string
 	JobType      string
 	Repository   string
-	Password     string
 	Command      []string
 	Args         []string
 	Env          []corev1.EnvVar
@@ -90,7 +97,7 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 	}
 
 	labels := map[string]string{
-		"app.kubernetes.io/managed-by": "autorestore-backup-operator",
+		"app.kubernetes.io/managed-by": constants.OperatorDomain,
 		"app.kubernetes.io/instance":   actualOwner.GetName(),
 		"job-type":                     spec.JobType,
 	}
@@ -141,4 +148,17 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 	}
 
 	return job, cm, nil
+}
+
+// IsJobFinished checks if a job has completed, either successfully or with an error.
+// It returns two booleans: the first indicates if the job is finished,
+// the second indicates if the job was successful.
+func IsJobFinished(job *batchv1.Job) (finished bool, succeeded bool) {
+	if job.Status.Succeeded > 0 {
+		return true, true
+	}
+	if job.Status.Failed > 0 {
+		return true, false
+	}
+	return false, false
 }

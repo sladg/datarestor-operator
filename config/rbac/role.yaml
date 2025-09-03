@@ -4,128 +4,128 @@ kind: ClusterRole
 metadata:
   name: manager-role
 rules:
-  - apiGroups:
-      - ""
-    resources:
-      - configmaps
-      - secrets
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - ""
-    resources:
-      - persistentvolumeclaims
-    verbs:
-      - create
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - ""
-    resources:
-      - pods
-    verbs:
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - apps
-    resources:
-      - deployments
-      - statefulsets
-    verbs:
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - backup.autorestore-backup-operator.com
-    resources:
-      - backupconfigs
-      - resticbackups
-      - resticrepositories
-      - resticrestores
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - backup.autorestore-backup-operator.com
-    resources:
-      - backupconfigs/finalizers
-      - resticbackups/finalizers
-      - resticrepositories/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - backup.autorestore-backup-operator.com
-    resources:
-      - backupconfigs/status
-      - resticbackups/status
-      - resticrepositories/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - backup.autorestore.com
-    resources:
-      - resticbackups
-      - resticrepositories
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - backup.autorestore.com
-    resources:
-      - resticrestores
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - backup.autorestore.com
-    resources:
-      - resticrestores/finalizers
-    verbs:
-      - update
-  - apiGroups:
-      - backup.autorestore.com
-    resources:
-      - resticrestores/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - batch
-    resources:
-      - jobs
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - backup.autorestore.com
+  resources:
+  - resticbackups
+  - resticrepositories
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - backup.autorestore.com
+  resources:
+  - resticrestores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - backup.autorestore.com
+  resources:
+  - resticrestores/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - backup.autorestore.com
+  resources:
+  - resticrestores/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - backup.datarestor-operator.com
+  resources:
+  - backupconfigs
+  - resticbackups
+  - resticrepositories
+  - resticrestores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - backup.datarestor-operator.com
+  resources:
+  - backupconfigs/finalizers
+  - resticbackups/finalizers
+  - resticrepositories/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - backup.datarestor-operator.com
+  resources:
+  - backupconfigs/status
+  - resticbackups/status
+  - resticrepositories/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

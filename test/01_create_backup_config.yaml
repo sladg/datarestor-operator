@@ -1,5 +1,5 @@
 # BackupConfig with multiple targets for testing
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: BackupConfig
 metadata:
   name: test-local-backup
@@ -38,7 +38,7 @@ spec:
 
 ---
 # BackupConfig with S3 (MinIO) target
-apiVersion: backup.autorestore-backup-operator.com/v1alpha1
+apiVersion: backup.datarestor-operator.com/v1alpha1
 kind: BackupConfig
 metadata:
   name: test-s3-backup
