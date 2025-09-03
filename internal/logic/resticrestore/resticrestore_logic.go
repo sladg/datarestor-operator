@@ -15,19 +15,25 @@ import (
 func HandleRestorePending(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
 	log := deps.Logger.Named("restore-pending")
 
-	err := utils.AddFinalizer(ctx, deps, restore, constants.ResticRestoreFinalizer)
+	repositoryObj, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, restore.Spec.Repository.Namespace, restore.Spec.Repository.Name)
+	if err != nil {
+		log.Errorw("Failed to get repository", "error", err)
+		return ctrl.Result{}, err
+	}
+
+	err = utils.AddFinalizer(ctx, deps, restore, constants.ResticRestoreFinalizer)
 	if err != nil {
 		log.Errorw("add finalizer failed", "error", err)
 		return ctrl.Result{}, err
 	}
 
 	// Check repository is ready
-	if restore.Spec.Repository.Status.Phase != v1.PhaseCompleted {
+	if repositoryObj.Status.Phase != v1.PhaseCompleted {
 		log.Debug("Repository not ready, requeueing")
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
-	stopPods := utils.ShouldStopPods(restore.Spec.Repository.Spec.BackupConfig)
+	stopPods := utils.ShouldStopPods(repositoryObj.Spec.BackupConfig)
 
 	if stopPods {
 		if err := utils.ManageWorkloadScaleForPVC(ctx, deps, restore.Spec.TargetPVC, restore, true); err != nil {
@@ -36,7 +42,7 @@ func HandleRestorePending(ctx context.Context, deps *utils.Dependencies, restore
 		}
 	}
 
-	jobSpec := utils.BuildRestoreJobSpec(restore, restore.Spec.Repository)
+	jobSpec := utils.BuildRestoreJobSpec(restore, repositoryObj)
 	restore.Status.Phase = v1.PhaseRunning
 	restore.Status.Job, _, err = utils.CreateResticJobWithOutput(ctx, deps, jobSpec, restore)
 	if err != nil {
@@ -59,7 +65,7 @@ func HandleRestoreRunning(ctx context.Context, deps *utils.Dependencies, restore
 	log := deps.Logger.Named("restore")
 	log.Info("Handling running restore")
 
-	finished, succeeded := utils.IsJobFinished(restore.Status.Job)
+	finished, succeeded := utils.IsJobFinished(ctx, deps, restore.Status.Job)
 
 	if !finished {
 		log.Debug("Restore job is still running")
@@ -72,7 +78,9 @@ func HandleRestoreRunning(ctx context.Context, deps *utils.Dependencies, restore
 	} else {
 		log.Errorw("Restore job failed. Moving to Failed phase.")
 		restore.Status.Phase = v1.PhaseFailed
-		restore.Status.Error = restore.Status.Job.Status.Conditions[0].Message
+
+		// @TODO: Get errors from pod logs / job
+		restore.Status.Error = "Restore job failed"
 	}
 
 	restore.Status.CompletionTime = &metav1.Time{Time: metav1.Now().Time}
@@ -85,11 +93,11 @@ func HandleRestoreCompleted(ctx context.Context, deps *utils.Dependencies, resto
 	log := deps.Logger.Named("restore-completed")
 	log.Info("Handling completed restore")
 
-	if restore.Status.Job == nil {
+	if restore.Status.Job.Name == "" {
 		return ctrl.Result{}, nil
 	}
 
-	if err := deps.Delete(ctx, restore.Status.Job); err != nil {
+	if err := utils.DeleteJob(ctx, deps, restore.Status.Job); err != nil {
 		log.Errorw("Failed to clean up completed restore job", "error", err)
 	} else {
 		log.Info("Successfully cleaned up completed restore job")
@@ -106,14 +114,16 @@ func HandleRestoreFailed(ctx context.Context, deps *utils.Dependencies, restore 
 	log := deps.Logger.Named("restore-failed")
 	log.Info("Handling failed restore")
 
-	if restore.Status.Job == nil {
+	if restore.Status.Job.Name == "" {
 		return ctrl.Result{}, nil
 	}
 
 	podLogs, _ := utils.GetJobLogs(ctx, deps, restore.Status.Job)
 
 	restore.Status.Phase = v1.PhaseFailed
-	restore.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", restore.Status.Job.Status.Conditions[0].Reason, restore.Status.Job.Status.Conditions[0].Message, podLogs)
+
+	// @TODO: Get errors from pod logs / job
+	restore.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", "Restore job failed", "Restore job failed", podLogs)
 
 	log.Errorw("Restore job failed", restore.Status.Error)
 
@@ -123,7 +133,7 @@ func HandleRestoreFailed(ctx context.Context, deps *utils.Dependencies, restore 
 	}
 
 	// Clean up the failed job
-	if err := deps.Delete(ctx, restore.Status.Job); err != nil {
+	if err := utils.DeleteJob(ctx, deps, restore.Status.Job); err != nil {
 		log.Errorw("Failed to clean up failed restore job", "error", err)
 	} else {
 		log.Info("Successfully cleaned up failed restore job")

@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
 	"go.uber.org/zap"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -140,7 +141,7 @@ func FindRestoresByBackupName(ctx context.Context, deps *Dependencies, namespace
 func FindPodsForJob(ctx context.Context, deps *Dependencies, job *batchv1.Job) (*corev1.PodList, error) {
 	podList := &corev1.PodList{}
 	err := deps.List(ctx, podList, client.InNamespace(job.Namespace), client.MatchingLabels{
-		"controller-uid": string(job.UID),
+		constants.LabelControllerUID: string(job.UID),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods for job %s in namespace %s: %w", job.Name, job.Namespace, err)

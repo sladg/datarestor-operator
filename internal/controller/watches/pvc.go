@@ -12,11 +12,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+func selectorInNamespace(namespace string) v1.Selector {
+	return v1.Selector{
+		Namespaces: []string{namespace},
+	}
+}
+
 // pvcToRequests converts a PVC to a list of reconcile requests
 func pvcToRequests(ctx context.Context, deps *utils.Dependencies, pvc *corev1.PersistentVolumeClaim) []reconcile.Request {
 	// List all BackupConfigs in the namespace
 	backupConfigList := &v1.BackupConfigList{}
-	selector := utils.SelectorInNamespace(pvc.Namespace)
+	selector := selectorInNamespace(pvc.Namespace)
 	backupConfigs, err := utils.FindMatchingResources[*v1.BackupConfig](ctx, deps, []v1.Selector{selector}, backupConfigList)
 	if err != nil {
 		return nil

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
-	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,15 +31,14 @@ func createResticRestore(ctx context.Context, deps *utils.Dependencies, backupCo
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      namePrefix,
 			Namespace: pvc.Namespace,
-			Labels: map[string]string{
-				constants.LabelPVCName:      pvc.Name,
-				constants.LabelBackupConfig: backupConfig.Name,
-			},
 		},
 		Spec: v1.ResticRestoreSpec{
-			Name:       fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
-			Repository: repository,
-			Type:       restoreType,
+			Name: fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
+			Repository: corev1.ObjectReference{
+				Name:      repository.Name,
+				Namespace: repository.Namespace,
+			},
+			Type: restoreType,
 			TargetPVC: corev1.ObjectReference{
 				Name:      pvc.Name,
 				Namespace: pvc.Namespace,

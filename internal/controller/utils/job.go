@@ -9,6 +9,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -28,7 +29,7 @@ type ResticJobSpec struct {
 }
 
 // CreateResticJobWithOutput creates a restic job with output capture
-func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec ResticJobSpec, owner metav1.Object) (*batchv1.Job, *corev1.ConfigMap, error) {
+func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec ResticJobSpec, owner metav1.Object) (corev1.ObjectReference, *corev1.ConfigMap, error) {
 	// Use the owner from spec if provided, otherwise use the passed owner
 	actualOwner := owner
 	if spec.Owner != nil {
@@ -83,7 +84,7 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(actualOwner, job, deps.Scheme); err != nil {
-		return nil, nil, err
+		return corev1.ObjectReference{}, nil, err
 	}
 
 	// Create output configmap
@@ -96,36 +97,56 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 	}
 
 	if err := controllerutil.SetControllerReference(actualOwner, cm, deps.Scheme); err != nil {
-		return nil, nil, err
+		return corev1.ObjectReference{}, nil, err
 	}
 
 	// Actually create the job in the cluster
 	if err := deps.Create(ctx, job); err != nil {
-		return nil, nil, fmt.Errorf("failed to create job in Kubernetes: %w", err)
+		return corev1.ObjectReference{}, nil, fmt.Errorf("failed to create job in Kubernetes: %w", err)
 	}
 
 	// Actually create the ConfigMap in the cluster
 	if err := deps.Create(ctx, cm); err != nil {
 		// Attempt to clean up the job since the ConfigMap creation failed
 		if deleteErr := deps.Delete(ctx, job); deleteErr != nil {
-			return nil, nil, fmt.Errorf("failed to create ConfigMap: %w, and failed to clean up job: %v", err, deleteErr)
+			return corev1.ObjectReference{}, nil, fmt.Errorf("failed to create ConfigMap: %w, and failed to clean up job: %v", err, deleteErr)
 		}
-		return nil, nil, fmt.Errorf("failed to create ConfigMap: %w", err)
+		return corev1.ObjectReference{}, nil, fmt.Errorf("failed to create ConfigMap: %w", err)
 	}
 
-	return job, cm, nil
+	return corev1.ObjectReference{Name: jobName, Namespace: namespace}, cm, nil
 }
 
 // IsJobFinished checks if a job has completed, either successfully or with an error.
 // It returns two booleans: the first indicates if the job is finished,
 // the second indicates if the job was successful.
-func IsJobFinished(job *batchv1.Job) (finished bool, succeeded bool) {
-	if job.Status.Succeeded > 0 {
+func IsJobFinished(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) (finished bool, succeeded bool) {
+	var jobObj batchv1.Job
+	err := deps.Get(ctx, client.ObjectKey{Name: job.Name, Namespace: job.Namespace}, &jobObj)
+	if err != nil {
+		return false, false
+	}
+
+	if jobObj.Status.Succeeded > 0 {
 		return true, true
 	}
-	if job.Status.Failed > 0 {
+	if jobObj.Status.Failed > 0 {
 		return true, false
 	}
 
 	return false, false
+}
+
+func DeleteJob(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) error {
+	var jobObj batchv1.Job
+	if err := deps.Get(ctx, client.ObjectKey{Name: job.Name, Namespace: job.Namespace}, &jobObj); err != nil {
+		// Job not found, nothing to delete
+		return nil
+	}
+
+	err := deps.Delete(ctx, &jobObj)
+	if err != nil {
+		return fmt.Errorf("failed to delete job: %w", err)
+	}
+	return nil
 }

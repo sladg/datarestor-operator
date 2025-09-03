@@ -13,7 +13,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
-	"github.com/sladg/datarestor-operator/internal/constants"
 )
 
 // ManageWorkloadScaleForPVC handles scaling workloads up or down for a given PVC.
@@ -39,18 +38,11 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc core
 			return fmt.Errorf("failed to store original replica annotation: %w", err)
 		}
 
-		if err != nil {
-			return fmt.Errorf("failed to marshal original replica counts: %w", err)
-		}
-
 		if err := SetOriginalReplicasAnnotation(ctx, deps, owner, originalReplicas); err != nil {
 			return fmt.Errorf("failed to set original replica annotation: %w", err)
 		}
 
 		for _, workload := range workloads {
-			if err := AddFinalizer(ctx, deps, workload, constants.WorkloadFinalizer); err != nil {
-				log.Errorw("Failed to add finalizer to workload", "error", err, "workload", workload.GetName())
-			}
 			patch := []byte(`{"spec":{"replicas":0}}`)
 			if err := deps.Patch(ctx, workload, client.RawPatch(types.MergePatchType, patch)); err != nil {
 				log.Errorw("Failed to scale down workload", "error", err, "workload", workload.GetName())
@@ -84,10 +76,6 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc core
 				continue
 			}
 			log.Infow("Scaled up workload", "workload", wl.GetName(), "replicas", info.Replicas)
-
-			if err := RemoveFinalizer(ctx, deps, wl, constants.WorkloadFinalizer); err != nil {
-				log.Errorw("Failed to remove finalizer from workload", "error", err, "workload", wl.GetName())
-			}
 		}
 
 		return RemoveOriginalReplicasAnnotation(ctx, deps, owner)

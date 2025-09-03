@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
-	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,20 +12,18 @@ import (
 )
 
 // createResticBackup creates a ResticBackup resource.
-func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, backupName string, target v1.BackupTarget, repository *v1.ResticRepository) error {
+func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, backupName string, repository *v1.ResticRepository) error {
 	backup := &v1.ResticBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      backupName,
 			Namespace: pvc.Namespace,
-			Labels: map[string]string{
-				constants.LabelPVCName:      pvc.Name,
-				constants.LabelBackupConfig: backupConfig.Name,
-				"backup-target":             target.Name,
-			},
 		},
 		Spec: v1.ResticBackupSpec{
-			Name:       fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
-			Repository: repository,
+			Name: fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
+			Repository: corev1.ObjectReference{
+				Name:      repository.Name,
+				Namespace: repository.Namespace,
+			},
 			SourcePVC: corev1.ObjectReference{
 				Name:      pvc.Name,
 				Namespace: pvc.Namespace,

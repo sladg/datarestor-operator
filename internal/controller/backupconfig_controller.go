@@ -93,10 +93,10 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Handle scheduled backups on a per-target basis
-	if err := logic.HandleScheduledBackups(ctx, r.Deps, backupConfig, pvcs); err != nil {
-		log.Errorw("Failed to handle scheduled backups", "error", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
-	}
+	// if err := logic.HandleScheduledBackups(ctx, r.Deps, backupConfig, pvcs); err != nil {
+	// 	log.Errorw("Failed to handle scheduled backups", "error", err)
+	// 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	// }
 
 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 }
@@ -105,6 +105,8 @@ func (r *BackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.BackupConfig{}).
 		Owns(&v1.ResticRepository{}).
+		Owns(&v1.ResticBackup{}).
+		Owns(&v1.ResticRestore{}).
 		Watches(
 			&corev1.PersistentVolumeClaim{},
 			handler.EnqueueRequestsFromMapFunc(watches.FindObjectsForPVC(r.Deps)),

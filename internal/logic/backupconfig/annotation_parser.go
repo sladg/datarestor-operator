@@ -40,7 +40,7 @@ func HandleAnnotations(ctx context.Context, deps *utils.Dependencies, backupConf
 						continue
 					}
 
-					if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, *target, repo); err != nil {
+					if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, repo); err != nil {
 						log.Errorw("Failed to create manual ResticBackup from BackupConfig annotation",
 							"pvc", pvc.Name, "target", target.Name, "error", err)
 						continue
@@ -77,7 +77,7 @@ func HandleAnnotations(ctx context.Context, deps *utils.Dependencies, backupConf
 					log.Errorw("Failed to get ResticRepository for manual backup", "repo", target.Repository.Name, "error", err)
 					continue
 				}
-				if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, *target, repo); err != nil {
+				if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, repo); err != nil {
 					log.Errorw("Failed to create manual ResticBackup from PVC annotation",
 						"pvc", pvc.Name, "target", target.Name, "error", err)
 					continue

@@ -21,18 +21,10 @@ func HandleBackupConfigDeletion(ctx context.Context, deps *utils.Dependencies, b
 
 	log.Info("start")
 
-	if utils.ContainsFinalizer(backupConfig, constants.BackupConfigFinalizer) {
-		// Clean up any resources created by this BackupConfig
-		// NOTE: not needed as all resources are owned by the BackupConfig
-
-		// PVCs are kept in place.
-
-		// Remove finalizer
-		log.Debugw("Removing finalizer", "name", backupConfig.Name)
-		if err := utils.RemoveFinalizer(ctx, deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
-			log.Errorw("remove finalizer failed", "error", err)
-			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-		}
+	log.Debugw("Removing finalizer", "name", backupConfig.Name)
+	if err := utils.RemoveFinalizer(ctx, deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
+		log.Errorw("remove finalizer failed", "error", err)
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
 	log.Info("end")
@@ -80,7 +72,7 @@ func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConf
 
 	for _, pvc := range managedPVCs {
 		// If the PVC already has the restore finalizer, it's either being restored or has been restored.
-		if controllerutil.ContainsFinalizer(pvc, constants.PVCRestoreFinalizer) {
+		if controllerutil.ContainsFinalizer(pvc, constants.ResticRestoreFinalizer) {
 			log.Debugw("PVC already has restore finalizer, skipping auto-restore", "pvc", pvc.Name)
 			continue
 		}
@@ -104,7 +96,7 @@ func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConf
 			log.Warnw("No backup targets defined for auto-restore", "backupconfig", backupConfig.Name)
 		}
 		// Add finalizer to mark it as processed by us for restore
-		controllerutil.AddFinalizer(pvc, constants.PVCRestoreFinalizer)
+		controllerutil.AddFinalizer(pvc, constants.ResticRestoreFinalizer)
 		if err := deps.Update(ctx, pvc); err != nil {
 			log.Errorw("Failed to add finalizer to PVC after auto-restore", "pvc", pvc.Name, "error", err)
 		}
@@ -118,8 +110,10 @@ func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backu
 
 	// Get existing ResticBackups to check their status
 	existingBackups := &v1.ResticBackupList{}
+
+	// @TODO: Fix this mess
 	if err := deps.List(ctx, existingBackups, client.InNamespace(backupConfig.Namespace), client.MatchingLabels{
-		"backup-config": backupConfig.Name,
+		"TMP": backupConfig.Name,
 	}); err != nil {
 		log.Errorw("Failed to list existing backups", "error", err)
 		return err
@@ -168,7 +162,7 @@ func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backu
 					pvc.Name,
 					time.Now().Unix())
 
-				if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, *target, repo); err != nil {
+				if err := createResticBackup(ctx, deps, backupConfig, pvc, backupName, repo); err != nil {
 					log.Errorw("Failed to create scheduled backup",
 						"pvc", pvc.Name,
 						"target", target.Name,

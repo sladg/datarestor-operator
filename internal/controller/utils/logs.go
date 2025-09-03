@@ -9,6 +9,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // fetchPodLogs retrieves logs from a pod's container
@@ -50,9 +51,15 @@ func fetchPodLogs(ctx context.Context, k8sClient *kubernetes.Clientset, pod *cor
 
 // GetJobLogs retrieves logs from the most recent pod of a job.
 // It follows a similar pattern to CreateResticJobWithOutput for consistency.
-func GetJobLogs(ctx context.Context, deps *Dependencies, job *batchv1.Job) (string, error) {
+func GetJobLogs(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) (string, error) {
+	var jobObj *batchv1.Job
+	err := deps.Get(ctx, client.ObjectKey{Name: job.Name, Namespace: job.Namespace}, jobObj)
+	if err != nil {
+		return "", fmt.Errorf("failed to get job %s in namespace %s: %w", job.Name, job.Namespace, err)
+	}
+
 	// Find pods created by the job
-	podList, err := FindPodsForJob(ctx, deps, job)
+	podList, err := FindPodsForJob(ctx, deps, jobObj)
 	if err != nil {
 		return "", fmt.Errorf("failed to list pods for job %s in namespace %s: %w", job.Name, job.Namespace, err)
 	}

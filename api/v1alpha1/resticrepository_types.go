@@ -17,7 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -81,7 +80,7 @@ type ResticRepositoryStatus struct {
 
 	// Reference to the current repository check job
 	// +optional
-	Job *batchv1.Job `json:"job,omitempty"`
+	Job corev1.ObjectReference `json:"job,omitempty"`
 
 	// Next maintenance time
 	// +required

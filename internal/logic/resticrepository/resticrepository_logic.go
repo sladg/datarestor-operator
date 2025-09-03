@@ -7,6 +7,8 @@ import (
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -14,14 +16,28 @@ func HandleRepoPending(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 	log := deps.Logger.Named("repo-pending")
 	log.Info("Handling pending repository", "name", repo.Name)
 
-	if repo.Status.Job == nil {
+	// Add the repository finalizer
+	if err := utils.AddFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer); err != nil {
+		log.Errorw("Failed to add finalizer", "error", err)
+		repo.Status.Phase = v1.PhaseFailed
+		if err := deps.Status().Update(ctx, repo); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
+	}
+
+	if repo.Status.Job.Name == "" {
 		jobSpec := utils.BuildCheckJobSpec(repo)
 		job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec, repo)
 		if err != nil {
 			log.Errorw("Failed to create check job", "error", err)
 			repo.Status.Phase = v1.PhaseFailed
-			repo.Status.Error = err.Error()
-			return ctrl.Result{}, err
+
+			if err := deps.Status().Update(ctx, repo); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 		}
 
 		repo.Status.Job = job
@@ -34,7 +50,7 @@ func HandleRepoPending(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 	}
 
 	// Check if the job is finished
-	finished, succeeded := utils.IsJobFinished(repo.Status.Job)
+	finished, succeeded := utils.IsJobFinished(ctx, deps, repo.Status.Job)
 	if !finished {
 		log.Debug("Check job still running")
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
@@ -47,11 +63,11 @@ func HandleRepoPending(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 		log.Info("Repository check failed, assuming not initialized")
 		repo.Status.Phase = v1.PhaseRunning
 
-		if err := deps.Delete(ctx, repo.Status.Job); err != nil {
+		if err := utils.DeleteJob(ctx, deps, repo.Status.Job); err != nil {
 			log.Errorw("Failed to clean up check repository job", "error", err)
 		}
 
-		repo.Status.Job = nil
+		repo.Status.Job = corev1.ObjectReference{}
 	}
 
 	if err := deps.Status().Update(ctx, repo); err != nil {
@@ -67,14 +83,17 @@ func HandleRepoRunning(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 	log := deps.Logger.Named("repo-running")
 	log.Info("Handling running repository")
 
-	if repo.Status.Job == nil {
+	if repo.Status.Job.Name == "" {
 		jobSpec := utils.BuildInitJobSpec(repo)
 		job, _, err := utils.CreateResticJobWithOutput(ctx, deps, jobSpec, repo)
 		if err != nil {
 			log.Errorw("Failed to create init job", "error", err)
 			repo.Status.Phase = v1.PhaseFailed
-			repo.Status.Error = err.Error()
-			return ctrl.Result{}, err
+			if err := deps.Status().Update(ctx, repo); err != nil {
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 		}
 
 		repo.Status.Job = job
@@ -86,7 +105,7 @@ func HandleRepoRunning(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
-	finished, succeeded := utils.IsJobFinished(repo.Status.Job)
+	finished, succeeded := utils.IsJobFinished(ctx, deps, repo.Status.Job)
 	if !finished {
 		log.Debug("Init job still running")
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
@@ -96,7 +115,7 @@ func HandleRepoRunning(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 		log.Info("Repository initialization job succeeded")
 		repo.Status.Phase = v1.PhaseCompleted
 	} else {
-		log.Errorw("Repository initialization job failed", "error", repo.Status.Job.Status.Conditions[0].Message)
+		log.Errorw("Repository initialization job failed", "error", "Repository initialization job failed")
 		repo.Status.Phase = v1.PhaseFailed
 	}
 
@@ -111,14 +130,20 @@ func HandleRepoCompleted(ctx context.Context, deps *utils.Dependencies, repo *v1
 	log := deps.Logger.Named("repo-completed")
 	log.Info("Handling completed repository")
 
-	if repo.Status.Job == nil {
+	if repo.Status.Job.Name == "" {
 		return ctrl.Result{}, nil
 	}
 
-	if err := deps.Delete(ctx, repo.Status.Job); err != nil {
+	if err := utils.DeleteJob(ctx, deps, repo.Status.Job); err != nil {
 		log.Errorw("Failed to clean up completed repository job", "error", err)
 	} else {
 		log.Info("Successfully cleaned up completed backup job")
+	}
+
+	repo.Status.InitializedTime = &metav1.Time{Time: metav1.Now().Time}
+	if err := deps.Status().Update(ctx, repo); err != nil {
+		log.Errorw("Failed to update repository status", "error", err)
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
@@ -128,20 +153,20 @@ func HandleRepoFailed(ctx context.Context, deps *utils.Dependencies, repo *v1.Re
 	log := deps.Logger.Named("repo-failed")
 	log.Info("Handling failed repository")
 
-	if repo.Status.Job == nil {
+	if repo.Status.Job.Name == "" {
 		return ctrl.Result{}, nil
 	}
 
 	podLogs, _ := utils.GetJobLogs(ctx, deps, repo.Status.Job)
 
-	repo.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", repo.Status.Job.Status.Conditions[0].Reason, repo.Status.Job.Status.Conditions[0].Message, podLogs)
+	repo.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", "Repository initialization job failed", "Repository initialization job failed", podLogs)
 	log.Errorw("Repository initialization job failed", repo.Status.Error)
 
 	if err := deps.Status().Update(ctx, repo); err != nil {
 		log.Errorw("Failed to update repository status with failure logs", "error", err)
 	}
 
-	if err := deps.Delete(ctx, repo.Status.Job); err != nil {
+	if err := utils.DeleteJob(ctx, deps, repo.Status.Job); err != nil {
 		log.Errorw("Failed to clean up failed repository job", "error", err)
 	} else {
 		log.Info("Successfully cleaned up failed repository job")

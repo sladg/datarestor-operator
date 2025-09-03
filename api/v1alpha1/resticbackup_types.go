@@ -17,7 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -26,7 +25,7 @@ import (
 type ResticBackupSpec struct {
 	// Reference to the ResticRepository in the same namespace
 	// +required
-	Repository *ResticRepository `json:"repository"`
+	Repository corev1.ObjectReference `json:"repository"`
 
 	// Name of the backup
 	// +required
@@ -59,7 +58,7 @@ type ResticBackupStatus struct {
 
 	// Reference to the backup job
 	// +optional
-	Job *batchv1.Job `json:"job,omitempty"`
+	Job corev1.ObjectReference `json:"job,omitempty"`
 
 	// Duration of the backup job as a string.
 	// +optional

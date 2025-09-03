@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -32,8 +33,7 @@ type BackupTarget struct {
 
 	// Reference to the ResticRepository to use for backups
 	// +required
-	// +kubebuilder:object:generate=false
-	Repository ResticRepository `json:"repository"`
+	Repository corev1.ObjectReference `json:"repository"`
 
 	// Cron schedule for retention checks (e.g., "0 3 * * *" for daily at 3 AM)
 	// If not specified, defaults to "0 3 * * *"
@@ -107,7 +107,7 @@ type BackupConfigStatus struct {
 	// List of repositories managed by this config
 	// +optional
 	// +kubebuilder:object:generate=false
-	Repositories []ResticRepository `json:"repositories,omitempty"`
+	Repositories []corev1.ObjectReference `json:"repositories,omitempty"`
 }
 
 // +kubebuilder:object:root=true
