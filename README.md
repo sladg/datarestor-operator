@@ -1,5 +1,9 @@
 # AutoRestore Backup Operator
 
+## 🚧 UNDER CONSTRUCTION 🚧
+
+---
+
 An operator for automated PVC backup and restore with Restic.
 A cheap, self-host-friendly operator that copies your volumes data on a schedule and populates them back automagically whenever you rebuild the cluster and your volumes are gone.
 
@@ -12,8 +16,6 @@ Running a K8s cluster at home is fun — losing/restoring/rebuilding it isn’t.
 - Cluster goes boom? Re-deploy the operator and it re-hydrates your volumes — no wall of YAML, no `kubectl cp`, no manual intervention.
 
 Perfect for disaster recovery, painless migrations, simple rollbacks on failed upgrades.
-
-> **Warning**: This project is under active construction. APIs and functionality may change without prior notice.
 
 ## User Guide
 
