@@ -7,158 +7,145 @@ import (
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-func HandleRestorePending(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
-	log := deps.Logger.Named("restore-pending")
+func cleanupRestoreJob(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) {
+	log := deps.Logger.Named("[cleanupRestoreJob]")
 
-	repositoryObj, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, restore.Spec.Repository.Namespace, restore.Spec.Repository.Name)
-	if err != nil {
-		log.Errorw("Failed to get repository", "error", err)
-		return ctrl.Result{}, err
-	}
-
-	err = utils.AddFinalizer(ctx, deps, restore, constants.ResticRestoreFinalizer)
-	if err != nil {
-		log.Errorw("add finalizer failed", "error", err)
-		return ctrl.Result{}, err
-	}
-
-	// Check repository is ready
-	if repositoryObj.Status.Phase != v1.PhaseCompleted {
-		log.Debug("Repository not ready, requeueing")
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-	}
-
-	stopPods := utils.ShouldStopPods(repositoryObj.Spec.BackupConfig)
-
-	if stopPods {
-		if err := utils.ManageWorkloadScaleForPVC(ctx, deps, restore.Spec.TargetPVC, restore, true); err != nil {
-			log.Errorw("Failed to scale down workloads", "error", err)
-			return ctrl.Result{}, err
+	if restore.Status.Job.Name != "" {
+		if err := utils.DeleteJob(ctx, deps, restore.Status.Job); err != nil {
+			log.Warnw("Failed to delete job during cleanup", "error", err)
 		}
+	}
+}
+
+func manageRestoreWorkloads(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore, scaleDown bool) error {
+	return utils.ManageWorkloadScaleForPVC(ctx, deps, restore.Spec.TargetPVC, restore, scaleDown)
+}
+
+func HandleRestoreUnknown(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
+	restore.Status.Phase = v1.PhasePending
+	if err := deps.Status().Update(ctx, restore); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
+}
+
+func HandleRestorePending(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
+	log := deps.Logger.Named("[HandlePending]")
+
+	if err := utils.ValidateRestoreReferences(ctx, deps, restore); err != nil {
+		log.Warnw("Failed to validate restore references", "error", err)
+		return ctrl.Result{}, utils.SetOperationFailed(ctx, deps, restore, err.Error())
+	}
+
+	if err := utils.ValidateRestoreObjectsExist(ctx, deps, restore); err != nil {
+		log.Warnw("Failed to validate restore objects exist", "error", err)
+		return ctrl.Result{}, utils.SetOperationFailed(ctx, deps, restore, err.Error())
+	}
+
+	repositoryObj, err := utils.GetRepositoryForOperation(ctx, deps, restore.Spec.Repository.Namespace, restore.Spec.Repository.Name)
+	if err != nil {
+		log.Warnw("Failed to get repository for operation", "error", err)
+		return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, nil
+	}
+
+	if utils.ContainsFinalizerWithRef(ctx, deps, restore.Spec.TargetPVC, constants.ResticRestoreFinalizer) {
+		return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, nil
+	}
+
+	if err := utils.AddFinalizer(ctx, deps, restore, constants.ResticRestoreFinalizer); err != nil {
+		log.Warnw("Failed to add finalizer", "error", err)
+		return ctrl.Result{}, err
 	}
 
 	jobSpec := utils.BuildRestoreJobSpec(restore, repositoryObj)
 	restore.Status.Phase = v1.PhaseRunning
 	restore.Status.Job, _, err = utils.CreateResticJobWithOutput(ctx, deps, jobSpec, restore)
 	if err != nil {
-		log.Errorw("Failed to create restore job", "error", err)
-		restore.Status.Phase = v1.PhaseFailed
-		restore.Status.Error = err.Error()
-		if err := deps.Update(ctx, restore); err != nil {
-			log.Errorw("Failed to update restore status", "error", err)
-			return ctrl.Result{}, err
-		}
-
-		return ctrl.Result{}, err
+		return ctrl.Result{}, utils.SetOperationFailed(ctx, deps, restore, err.Error())
 	}
 
-	err = deps.Status().Update(ctx, restore)
-	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, deps.Status().Update(ctx, restore)
 }
 
 func HandleRestoreRunning(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
-	log := deps.Logger.Named("restore")
-	log.Info("Handling running restore")
-
 	finished, succeeded := utils.IsJobFinished(ctx, deps, restore.Status.Job)
 
 	if !finished {
-		log.Debug("Restore job is still running")
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
+	restore.Status.CompletionTime = &metav1.Time{Time: metav1.Now().Time}
+
 	if succeeded {
-		log.Info("Restore job succeeded. Moving to Completed phase.")
 		restore.Status.Phase = v1.PhaseCompleted
 	} else {
-		log.Errorw("Restore job failed. Moving to Failed phase.")
-		restore.Status.Phase = v1.PhaseFailed
-
-		// @TODO: Get errors from pod logs / job
-		restore.Status.Error = "Restore job failed"
+		return ctrl.Result{}, utils.SetOperationFailed(ctx, deps, restore, "Restore job failed")
 	}
 
-	restore.Status.CompletionTime = &metav1.Time{Time: metav1.Now().Time}
-	err := deps.Status().Update(ctx, restore)
-	return ctrl.Result{}, err
-
+	return ctrl.Result{}, deps.Status().Update(ctx, restore)
 }
 
 func HandleRestoreCompleted(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
-	log := deps.Logger.Named("restore-completed")
-	log.Info("Handling completed restore")
+	log := deps.Logger.Named("[HandleCompleted]")
 
-	if restore.Status.Job.Name == "" {
-		return ctrl.Result{}, nil
+	cleanupRestoreJob(ctx, deps, restore)
+
+	if err := manageRestoreWorkloads(ctx, deps, restore, false); err != nil {
+		log.Errorw("Failed to scale up workloads during completion cleanup", err)
 	}
 
-	if err := utils.DeleteJob(ctx, deps, restore.Status.Job); err != nil {
-		log.Errorw("Failed to clean up completed restore job", "error", err)
-	} else {
-		log.Info("Successfully cleaned up completed restore job")
-	}
-
-	if err := utils.ManageWorkloadScaleForPVC(ctx, deps, restore.Spec.TargetPVC, restore, false); err != nil {
-		log.Errorw("Failed to scale up workloads after successful restore", "error", err)
+	if err := utils.RemoveFinalizerWithRef(ctx, deps, restore.Spec.TargetPVC, constants.ResticRestoreFinalizer); err != nil {
+		log.Errorw("Failed to remove restore finalizer from PVC during completion cleanup", err)
 	}
 
 	return ctrl.Result{}, nil
 }
 
 func HandleRestoreFailed(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
-	log := deps.Logger.Named("restore-failed")
-	log.Info("Handling failed restore")
+	log := deps.Logger.Named("[HandleFailed]")
 
-	if restore.Status.Job.Name == "" {
-		return ctrl.Result{}, nil
+	if restore.Status.Job.Name != "" {
+		if podLogs, _ := utils.GetJobLogs(ctx, deps, restore.Status.Job); podLogs != "" {
+			restore.Status.Error = fmt.Sprintf("Restore job failed. Logs: %s", podLogs)
+		}
+		cleanupRestoreJob(ctx, deps, restore)
 	}
 
-	podLogs, _ := utils.GetJobLogs(ctx, deps, restore.Status.Job)
-
-	restore.Status.Phase = v1.PhaseFailed
-
-	// @TODO: Get errors from pod logs / job
-	restore.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", "Restore job failed", "Restore job failed", podLogs)
-
-	log.Errorw("Restore job failed", restore.Status.Error)
-
-	// Update status with the log message
-	if err := deps.Status().Update(ctx, restore); err != nil {
-		log.Errorw("Failed to update restore status with failure logs", "error", err)
+	if err := manageRestoreWorkloads(ctx, deps, restore, false); err != nil {
+		log.Errorw("Failed to scale up workloads during failure cleanup", err)
 	}
 
-	// Clean up the failed job
-	if err := utils.DeleteJob(ctx, deps, restore.Status.Job); err != nil {
-		log.Errorw("Failed to clean up failed restore job", "error", err)
-	} else {
-		log.Info("Successfully cleaned up failed restore job")
+	if err := utils.RemoveFinalizerWithRef(ctx, deps, restore.Spec.TargetPVC, constants.ResticRestoreFinalizer); err != nil {
+		log.Errorw("Failed to remove restore finalizer from PVC during failure cleanup", err)
 	}
 
-	if err := utils.ManageWorkloadScaleForPVC(ctx, deps, restore.Spec.TargetPVC, restore, false); err != nil {
-		log.Errorw("Failed to scale up workloads after failed restore", "error", err)
-	}
-
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, deps.Status().Update(ctx, restore)
 }
 
 func HandleRestoreDeletion(ctx context.Context, deps *utils.Dependencies, restore *v1.ResticRestore) (ctrl.Result, error) {
-	log := deps.Logger.Named("restore-deletion")
+	log := deps.Logger.Named("[HandleDeletion]")
 
-	// Block deletion if the restore is in an active phase
-	// Once the phase transitions to completed or failed, the deletion is allowed - it will handle scaling up the workloads
 	if restore.Status.Phase == v1.PhaseUnknown || restore.Status.Phase == v1.PhaseRunning || restore.Status.Phase == v1.PhasePending {
-		log.Info("Deletion is blocked because the restore is in an active phase", "phase", restore.Status.Phase)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+		return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, nil
 	}
 
-	// Remove our finalizer
+	if restore.Status.Job.Name != "" {
+		cleanupRestoreJob(ctx, deps, restore)
+	}
+
+	if err := manageRestoreWorkloads(ctx, deps, restore, false); err != nil {
+		log.Errorw("Failed to scale up workloads during deletion cleanup", err)
+	}
+
+	if err := utils.RemoveFinalizerWithRef(ctx, deps, restore.Spec.TargetPVC, constants.ResticRestoreFinalizer); err != nil {
+		log.Errorw("Failed to remove restore finalizer from PVC during deletion cleanup", err)
+	}
+
 	if err := utils.RemoveFinalizer(ctx, deps, restore, constants.ResticRestoreFinalizer); err != nil {
-		log.Errorw("Failed to remove finalizer", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 

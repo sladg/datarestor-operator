@@ -3,7 +3,6 @@ package logic
 import (
 	"context"
 	"fmt"
-	"time"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
@@ -12,38 +11,42 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// createResticRestore creates a new ResticRestore resource.
-// If snapshotID is provided, it creates a manual restore; otherwise, it creates an automated restore.
-func createResticRestore(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, repository *v1.ResticRepository, snapshotID string) error {
+// RestoreRequest represents a flexible restore request that can handle various scenarios
+type RestoreRequest struct {
+	PVC         *corev1.PersistentVolumeClaim
+	Repository  corev1.ObjectReference
+	RestoreType v1.RestoreType
+	SnapshotID  string // "latest", "now", specific ID, or empty for default behavior
+}
 
-	// Determine restore type and name
-	var restoreType v1.RestoreType
-	var namePrefix string
-	if snapshotID != "" {
-		restoreType = v1.RestoreTypeManual
-		namePrefix = fmt.Sprintf("manual-restore-%s-%s-%s", backupConfig.Name, pvc.Name, snapshotID)
-	} else {
-		restoreType = v1.RestoreTypeAutomated
-		namePrefix = fmt.Sprintf("restore-%s-%s-%d", backupConfig.Name, pvc.Name, time.Now().Unix())
+// CreateRestoreForPVC creates a restore for a PVC with flexible parameters
+func CreateRestoreForPVC(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, req RestoreRequest) error {
+	log := deps.Logger.Named("create-restore-pvc")
+
+	// Create TargetPVC reference
+	targetPVC, err := utils.CreateObjectReference(req.PVC.Name, req.PVC.Namespace, "TargetPVC")
+	if err != nil {
+		log.Warnw("Failed to create TargetPVC reference", err)
+		return err
 	}
 
+	// Generate restore names
+	restoreName := utils.GenerateUniqueName(backupConfig.Name, req.PVC.Name, string(req.RestoreType))
+	shortHash := restoreName[len(restoreName)-6:]
+	restoreSpecName := fmt.Sprintf("%s-%s-%s", req.Repository.Name, req.PVC.Name, shortHash)
+
+	// Create the ResticRestore CRD directly
 	restore := &v1.ResticRestore{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      namePrefix,
-			Namespace: pvc.Namespace,
+			Name:      restoreName,
+			Namespace: backupConfig.Namespace,
 		},
 		Spec: v1.ResticRestoreSpec{
-			Name: fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
-			Repository: corev1.ObjectReference{
-				Name:      repository.Name,
-				Namespace: repository.Namespace,
-			},
-			Type: restoreType,
-			TargetPVC: corev1.ObjectReference{
-				Name:      pvc.Name,
-				Namespace: pvc.Namespace,
-			},
-			SnapshotID: snapshotID,
+			Name:       restoreSpecName,
+			Repository: req.Repository,
+			TargetPVC:  targetPVC,
+			Type:       req.RestoreType,
+			SnapshotID: req.SnapshotID,
 		},
 		Status: v1.ResticRestoreStatus{
 			CommonStatus: v1.CommonStatus{
@@ -52,11 +55,17 @@ func createResticRestore(ctx context.Context, deps *utils.Dependencies, backupCo
 		},
 	}
 
-	// Set owner reference
+	// Set controller reference
 	if err := controllerutil.SetControllerReference(backupConfig, restore, deps.Scheme); err != nil {
-		return fmt.Errorf("failed to set owner reference on ResticRestore: %w", err)
+		log.Warnw("Failed to set owner reference on ResticRestore", err)
+		return err
 	}
 
-	// Create the ResticRestore
-	return deps.Create(ctx, restore)
+	// Create the resource
+	if err := deps.Create(ctx, restore); err != nil {
+		log.Warnw("Failed to create ResticRestore", err)
+		return err
+	}
+
+	return nil
 }

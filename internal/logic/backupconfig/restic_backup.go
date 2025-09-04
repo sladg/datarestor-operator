@@ -11,31 +11,42 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// createResticBackup creates a ResticBackup resource.
-func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, pvc *corev1.PersistentVolumeClaim, backupName string, repository *v1.ResticRepository) error {
+// BackupRequest represents a flexible backup request that can handle various scenarios
+type BackupRequest struct {
+	PVC        *corev1.PersistentVolumeClaim
+	Repository corev1.ObjectReference
+	BackupType v1.BackupType
+	SnapshotID string // optional, can be empty for default behavior
+}
+
+// CreateBackupForPVC creates a backup for a PVC with flexible parameters
+func CreateBackupForPVC(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, req BackupRequest) error {
+	log := deps.Logger.Named("create-backup-pvc")
+
+	// Create SourcePVC reference
+	sourcePVC, err := utils.CreateObjectReference(req.PVC.Name, req.PVC.Namespace, "SourcePVC")
+	if err != nil {
+		log.Warnw("Failed to create SourcePVC reference", err)
+		return err
+	}
+
+	// Generate backup names
+	backupName := utils.GenerateUniqueName(backupConfig.Name, req.PVC.Name, string(req.BackupType))
+	shortHash := backupName[len(backupName)-6:]
+	backupSpecName := fmt.Sprintf("%s-%s-%s", req.Repository.Name, req.PVC.Name, shortHash)
+
+	// Create the ResticBackup CRD directly
 	backup := &v1.ResticBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      backupName,
-			Namespace: pvc.Namespace,
+			Namespace: backupConfig.Namespace,
 		},
 		Spec: v1.ResticBackupSpec{
-			Name: fmt.Sprintf("%s-%s", backupConfig.Name, pvc.Name),
-			Repository: corev1.ObjectReference{
-				Name:      repository.Name,
-				Namespace: repository.Namespace,
-			},
-			SourcePVC: corev1.ObjectReference{
-				Name:      pvc.Name,
-				Namespace: pvc.Namespace,
-			},
-			Type: v1.BackupTypeScheduled,
-			Args: []string{
-				"--tag", fmt.Sprintf("pvc=%s", pvc.Name),
-				"--tag", fmt.Sprintf("namespace=%s", pvc.Namespace),
-				"--tag", fmt.Sprintf("backup-config=%s", backupConfig.Name),
-				"--tag", "backup-type=scheduled",
-			},
-			SnapshotID: backupName,
+			Name:       backupSpecName,
+			Repository: req.Repository,
+			SourcePVC:  sourcePVC,
+			Type:       req.BackupType,
+			SnapshotID: req.SnapshotID,
 		},
 		Status: v1.ResticBackupStatus{
 			CommonStatus: v1.CommonStatus{
@@ -44,10 +55,17 @@ func createResticBackup(ctx context.Context, deps *utils.Dependencies, backupCon
 		},
 	}
 
-	// Set owner reference
+	// Set controller reference
 	if err := controllerutil.SetControllerReference(backupConfig, backup, deps.Scheme); err != nil {
-		return fmt.Errorf("failed to set controller reference: %w", err)
+		log.Warnw("Failed to set controller reference on ResticBackup", err)
+		return err
 	}
 
-	return deps.Create(ctx, backup)
+	// Create the resource
+	if err := deps.Create(ctx, backup); err != nil {
+		log.Warnw("Failed to create ResticBackup", err)
+		return err
+	}
+
+	return nil
 }

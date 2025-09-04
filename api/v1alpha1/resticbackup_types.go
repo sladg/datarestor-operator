@@ -75,6 +75,7 @@ type ResticBackupStatus struct {
 // +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.sourcePVC.name"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
+// +kubebuilder:printcolumn:name="SnapshotID",type="string",JSONPath=".spec.snapshotID"
 // +kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

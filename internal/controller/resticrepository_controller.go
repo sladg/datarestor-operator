@@ -26,6 +26,7 @@ import (
 	"github.com/sladg/datarestor-operator/internal/logic/resticrepository"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
 
 func NewResticRepositoryReconciler(deps *utils.Dependencies) (*ResticRepositoryReconciler, error) {
@@ -47,16 +48,20 @@ type ResticRepositoryReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 
 func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
+	logger := r.Deps.Logger.Named("[ResticRepository]").With("name", req.Name, "namespace", req.Namespace)
+
+	// Create dependencies with the named logger for inheritance
+	deps := *r.Deps
+	deps.Logger = logger
 
 	// Fetch the ResticRepository instance
 	resticRepo := &v1.ResticRepository{}
 	if err := r.Deps.Get(ctx, req.NamespacedName, resticRepo); err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("ResticRepository resource not found. Ignoring...")
+			logger.Info("ResticRepository resource not found. Ignoring...")
 			return ctrl.Result{}, nil
 		}
-		log.Errorw("Failed to get ResticRepository", "error", err)
+		logger.Errorw("Failed to get ResticRepository", err)
 		return ctrl.Result{}, err
 	}
 
@@ -69,43 +74,29 @@ func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 	}
 
-	p := resticRepo.Status.Phase
-
-	return utils.ProcessSteps(
-		utils.Step{
-			Condition: func() bool {
-				return p == v1.PhaseUnknown || p == v1.PhasePending
-			},
-			Action: func() (ctrl.Result, error) { return resticrepository.HandleRepoPending(ctx, r.Deps, resticRepo) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseRunning },
-			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoRunning(ctx, r.Deps, resticRepo) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseFailed },
-			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoFailed(ctx, r.Deps, resticRepo) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseCompleted },
-			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoCompleted(ctx, r.Deps, resticRepo) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseDeletion },
-			Action:    func() (ctrl.Result, error) { return resticrepository.HandleRepoDeletion(ctx, r.Deps, resticRepo) },
-		},
-		utils.Step{
-			Condition: func() bool { return true }, // Default case
-			Action: func() (ctrl.Result, error) {
-				r.Deps.Logger.Infow("Unknown or unhandled phase", "phase", p)
-				return ctrl.Result{}, fmt.Errorf("unknown or unhandled phase: %s", p)
-			},
-		},
-	)
+	// Handle different phases with dynamic phase checking
+	switch resticRepo.Status.Phase {
+	case v1.PhaseUnknown:
+		return resticrepository.HandleRepoUnknown(ctx, &deps, resticRepo)
+	case v1.PhasePending:
+		return resticrepository.HandleRepoPending(ctx, &deps, resticRepo)
+	case v1.PhaseRunning:
+		return resticrepository.HandleRepoRunning(ctx, &deps, resticRepo)
+	case v1.PhaseFailed:
+		return resticrepository.HandleRepoFailed(ctx, &deps, resticRepo)
+	case v1.PhaseCompleted:
+		return resticrepository.HandleRepoCompleted(ctx, &deps, resticRepo)
+	case v1.PhaseDeletion:
+		return resticrepository.HandleRepoDeletion(ctx, &deps, resticRepo)
+	default:
+		logger.Infow("Unknown or unhandled phase", "phase", resticRepo.Status.Phase)
+		return ctrl.Result{}, fmt.Errorf("unknown or unhandled phase: %s", resticRepo.Status.Phase)
+	}
 }
 
 func (r *ResticRepositoryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.ResticRepository{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }

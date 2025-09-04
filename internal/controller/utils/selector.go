@@ -31,7 +31,7 @@ func FindMatchingResources[T client.Object](
 		if len(selector.Namespaces) > 0 {
 			for _, ns := range selector.Namespaces {
 				if err := deps.List(ctx, list, client.InNamespace(ns)); err != nil {
-					log.Debugw("Failed to list resources in namespace", "error", err, "namespace", ns)
+					log.Debugw("Failed to list resources in namespace", err, "namespace", ns)
 					return nil, err
 				}
 				matchedResources = append(matchedResources, filterMatchingResources[T](list, selector, log)...)
@@ -39,7 +39,7 @@ func FindMatchingResources[T client.Object](
 		} else {
 			// If no namespaces specified, search all namespaces
 			if err := deps.List(ctx, list); err != nil {
-				log.Debugw("Failed to list resources in all namespaces", "error", err)
+				log.Debugw("Failed to list resources in all namespaces", err)
 				return nil, err
 			}
 			matchedResources = append(matchedResources, filterMatchingResources[T](list, selector, log)...)
@@ -168,6 +168,10 @@ func FindMatchingSelectors(obj client.Object, selectors []v1alpha1.Selector) []v
 		}
 	}
 	return matchingSelectors
+}
+
+func FindRepository(ctx context.Context, deps *Dependencies, repo corev1.ObjectReference) (*v1alpha1.ResticRepository, error) {
+	return GetResource[*v1alpha1.ResticRepository](ctx, deps.Client, repo.Namespace, repo.Name)
 }
 
 func matchesSelector(obj client.Object, selector *v1alpha1.Selector) bool {

@@ -76,33 +76,40 @@ func RemoveOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, o
 
 // AnnotateResources applies a set of annotations to a list of resources.
 // If a value in the annotations map is nil, the corresponding annotation is removed.
+// This function implements retry logic with exponential backoff to handle race conditions.
 func AnnotateResources(ctx context.Context, deps *Dependencies, resources []client.Object, annotations map[string]*string) error {
 	for _, resource := range resources {
-		currentAnnotations := resource.GetAnnotations()
-		if currentAnnotations == nil {
-			currentAnnotations = make(map[string]string)
-		}
-		modified := false
-		for key, value := range annotations {
-			if value == nil {
-				// A nil value indicates the annotation should be removed.
-				if _, exists := currentAnnotations[key]; exists {
-					delete(currentAnnotations, key)
-					modified = true
-				}
-			} else {
-				if currentAnnotations[key] != *value {
-					currentAnnotations[key] = *value
-					modified = true
-				}
+		err := UpdateWithRetry(ctx, deps, resource, func(ctx context.Context, obj client.Object) error {
+			currentAnnotations := obj.GetAnnotations()
+			if currentAnnotations == nil {
+				currentAnnotations = make(map[string]string)
 			}
-		}
 
-		if modified {
-			resource.SetAnnotations(currentAnnotations)
-			if err := deps.Update(ctx, resource); err != nil {
-				return fmt.Errorf("failed to update annotations for %s %s: %w", resource.GetObjectKind().GroupVersionKind().Kind, resource.GetName(), err)
+			modified := false
+			for key, value := range annotations {
+				if value == nil {
+					// A nil value indicates the annotation should be removed.
+					if _, exists := currentAnnotations[key]; exists {
+						delete(currentAnnotations, key)
+						modified = true
+					}
+				} else {
+					if currentAnnotations[key] != *value {
+						currentAnnotations[key] = *value
+						modified = true
+					}
+				}
 			}
+
+			if modified {
+				obj.SetAnnotations(currentAnnotations)
+				return deps.Update(ctx, obj)
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
 		}
 	}
 	return nil

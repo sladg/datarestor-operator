@@ -11,173 +11,147 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
+func HandleBackupUnknown(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
+	backup.Status.Phase = v1.PhasePending
+	if err := deps.Status().Update(ctx, backup); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
+}
+
 func HandleBackupPending(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
-	log := deps.Logger.Named("backup-pending")
+	log := deps.Logger.Named("[HandlePending]")
+	if err := utils.ValidateBackupReferences(ctx, deps, backup); err != nil {
+		return ctrl.Result{}, utils.SetOperationFailed(ctx, deps, backup, err.Error())
+	}
 
-	repositoryObj, err := utils.GetResource[*v1.ResticRepository](ctx, deps.Client, backup.Spec.Repository.Namespace, backup.Spec.Repository.Name)
+	if err := utils.ValidateBackupObjectsExist(ctx, deps, backup); err != nil {
+		log.Warnw("Failed to validate backup objects exist", "error", err)
+		return ctrl.Result{}, utils.SetOperationFailed(ctx, deps, backup, err.Error())
+	}
+
+	repositoryObj, err := utils.GetRepositoryForOperation(ctx, deps, backup.Spec.Repository.Namespace, backup.Spec.Repository.Name)
 	if err != nil {
-		log.Errorw("Failed to get repository", "error", err)
-		return ctrl.Result{}, err
-	}
-
-	// Check if the PVC already has the backup finalizer
-	if utils.ContainsFinalizerWithRef(ctx, deps, backup.Spec.SourcePVC, constants.ResticBackupFinalizer) {
-		log.Debug("PVC already finalizer, waiting")
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-	}
-
-	// Add the backup finalizer
-	err = utils.AddFinalizer(ctx, deps, backup, constants.ResticBackupFinalizer)
-	if err != nil {
-		log.Errorw("Failed to add finalizer", "error", err)
-		return ctrl.Result{}, err
-	}
-
-	// Add the PVC finalizer
-	err = utils.AddFinalizerWithRef(ctx, deps, backup.Spec.SourcePVC, constants.ResticBackupFinalizer)
-	if err != nil {
-		log.Errorw("Failed to add finalizer", "error", err)
-		return ctrl.Result{}, err
-	}
-
-	// Check repository is ready
-	if repositoryObj.Status.Phase != v1.PhaseCompleted {
-		log.Debug("Repository not ready, requeueing")
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-	}
-
-	stopPods := false // utils.ShouldStopPods(repositoryObj.Spec.BackupConfig)
-	if stopPods {
-		if err := utils.ManageWorkloadScaleForPVC(ctx, deps, backup.Spec.SourcePVC, backup, true); err != nil {
-			log.Errorw("Failed to scale down workloads", "error", err)
-			return ctrl.Result{}, err
+		if err.Error() == "repository not ready" {
+			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 		}
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	}
+
+	if err := utils.AddFinalizer(ctx, deps, backup, constants.ResticBackupFinalizer); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := utils.AddFinalizerWithRef(ctx, deps, backup.Spec.SourcePVC, constants.ResticBackupFinalizer); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if repositoryObj.Status.Phase != v1.PhaseCompleted {
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	}
+
+	if utils.ContainsFinalizerWithRef(ctx, deps, backup.Spec.SourcePVC, constants.ResticBackupFinalizer) {
+		return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, nil
 	}
 
 	jobSpec := utils.BuildBackupJobSpec(backup, repositoryObj)
 	backup.Status.Phase = v1.PhaseRunning
+	backup.Status.StartTime = &metav1.Time{Time: metav1.Now().Time}
 	backup.Status.Job, _, err = utils.CreateResticJobWithOutput(ctx, deps, jobSpec, backup)
 	if err != nil {
-		log.Errorw("Failed to create backup job", "error", err)
 		backup.Status.Phase = v1.PhaseFailed
 		backup.Status.Error = err.Error()
 		return ctrl.Result{}, err
 	}
 
-	err = deps.Status().Update(ctx, backup)
-	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
-
+	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, deps.Status().Update(ctx, backup)
 }
 
 func HandleBackupRunning(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
-	log := deps.Logger.Named("backup-running")
-	log.Info("Handling running backup")
-
 	finished, succeeded := utils.IsJobFinished(ctx, deps, backup.Status.Job)
 
 	if !finished {
-		log.Debug("Backup job is still running")
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
+	completionTime := metav1.Now()
+	backup.Status.CompletionTime = &metav1.Time{Time: completionTime.Time}
+
+	if backup.Status.StartTime != nil {
+		duration := completionTime.Sub(backup.Status.StartTime.Time)
+		backup.Status.Duration = metav1.Duration{Duration: duration}
+	}
+
 	if succeeded {
-		log.Info("Restore job succeeded. Moving to Completed phase.")
 		backup.Status.Phase = v1.PhaseCompleted
 	} else {
-		log.Errorw("Backup job failed. Moving to Failed phase.")
 		backup.Status.Phase = v1.PhaseFailed
 		backup.Status.Error = "Backup job failed"
 	}
 
-	backup.Status.CompletionTime = &metav1.Time{Time: metav1.Now().Time}
-	err := deps.Status().Update(ctx, backup)
-	return ctrl.Result{}, err
+	return ctrl.Result{}, deps.Status().Update(ctx, backup)
 }
 
 func HandleBackupCompleted(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
-	log := deps.Logger.Named("backup-completed")
-	log.Info("Handling completed backup")
+	log := deps.Logger.Named("[HandleCompleted]")
 
 	if err := utils.DeleteJob(ctx, deps, backup.Status.Job); err != nil {
-		log.Errorw("Failed to clean up completed backup job", "error", err)
-	} else {
-		log.Info("Successfully cleaned up completed backup job")
+		log.Warnw("Failed to delete job during cleanup", "error", err)
 	}
-
 	if err := utils.ManageWorkloadScaleForPVC(ctx, deps, backup.Spec.SourcePVC, backup, false); err != nil {
-		log.Errorw("Failed to scale up workloads on completion", "error", err)
+		log.Warnw("Failed to manage workload scale during cleanup", "error", err)
 	}
-
+	if err := utils.RemoveFinalizerWithRef(ctx, deps, backup.Spec.SourcePVC, constants.ResticBackupFinalizer); err != nil {
+		log.Warnw("Failed to remove finalizer during cleanup", "error", err)
+	}
 	return ctrl.Result{}, nil
 }
 
 func HandleBackupFailed(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
-	log := deps.Logger.Named("backup-failed")
-	log.Info("Handling failed backup")
+	log := deps.Logger.Named("[HandleFailed]")
 
-	if backup.Status.Job.Name == "" {
-		return ctrl.Result{}, nil
-	}
-
-	podLogs, _ := utils.GetJobLogs(ctx, deps, backup.Status.Job)
-
-	backup.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", "Backup job failed", "Backup job failed", podLogs)
-	log.Errorw("Backup job failed", backup.Status.Error)
-
-	if err := deps.Status().Update(ctx, backup); err != nil {
-		log.Errorw("Failed to update backup status with failure logs", "error", err)
-	}
-
-	if err := utils.DeleteJob(ctx, deps, backup.Status.Job); err != nil {
-		log.Errorw("Failed to clean up failed backup job", "error", err)
-	} else {
-		log.Info("Successfully cleaned up failed backup job")
-	}
-
-	if err := utils.ManageWorkloadScaleForPVC(ctx, deps, backup.Spec.SourcePVC, backup, false); err != nil {
-		log.Errorw("Failed to scale up workloads after failed backup", "error", err)
-	}
-
-	return ctrl.Result{}, nil
-}
-
-func HandleBackupDeletion(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
-	log := deps.Logger.Named("backup-deletion")
-
-	// Block deletion if the restore is in an active phase
-	// Once the phase transitions to completed or failed, the deletion is allowed - it will handle scaling up the workloads
-	if backup.Status.Phase == v1.PhaseUnknown || backup.Status.Phase == v1.PhaseRunning || backup.Status.Phase == v1.PhasePending {
-		log.Info("Deletion is blocked because the backup is in an active phase", "phase", backup.Status.Phase)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-	}
-
-	// Clean up any remaining job resources
 	if backup.Status.Job.Name != "" {
+		if podLogs, _ := utils.GetJobLogs(ctx, deps, backup.Status.Job); podLogs != "" {
+			backup.Status.Error = fmt.Sprintf("Backup job failed. Logs: %s", podLogs)
+		}
 		if err := utils.DeleteJob(ctx, deps, backup.Status.Job); err != nil {
-			log.Errorw("Failed to clean up job during deletion", "error", err)
-		} else {
-			log.Info("Successfully cleaned up job during deletion")
+			log.Warnw("Failed to delete job during cleanup", "error", err)
 		}
 	}
 
-	// Ensure workloads are scaled up
 	if err := utils.ManageWorkloadScaleForPVC(ctx, deps, backup.Spec.SourcePVC, backup, false); err != nil {
-		log.Errorw("Failed to scale up workloads during deletion", "error", err)
-		// Don't block deletion for workload scaling failures
+		log.Warnw("Failed to manage workload scale during cleanup", "error", err)
 	}
-
-	// Release the PVC finalizer
 	if err := utils.RemoveFinalizerWithRef(ctx, deps, backup.Spec.SourcePVC, constants.ResticBackupFinalizer); err != nil {
-		log.Errorw("Failed to remove finalizer", "error", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+		log.Warnw("Failed to remove finalizer during cleanup", "error", err)
 	}
 
-	// Release the backup finalizer
+	return ctrl.Result{}, deps.Status().Update(ctx, backup)
+}
+
+func HandleBackupDeletion(ctx context.Context, deps *utils.Dependencies, backup *v1.ResticBackup) (ctrl.Result, error) {
+	log := deps.Logger.Named("[HandleDeletion]")
+
+	if backup.Status.Phase == v1.PhaseUnknown || backup.Status.Phase == v1.PhaseRunning || backup.Status.Phase == v1.PhasePending {
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	}
+
+	if backup.Status.Job.Name != "" {
+		if err := utils.DeleteJob(ctx, deps, backup.Status.Job); err != nil {
+			log.Warnw("Failed to delete job during cleanup", "error", err)
+		}
+	}
+
+	if err := utils.ManageWorkloadScaleForPVC(ctx, deps, backup.Spec.SourcePVC, backup, false); err != nil {
+		log.Warnw("Failed to manage workload scale during cleanup", "error", err)
+	}
+	if err := utils.RemoveFinalizerWithRef(ctx, deps, backup.Spec.SourcePVC, constants.ResticBackupFinalizer); err != nil {
+		log.Warnw("Failed to remove finalizer during cleanup", "error", err)
+	}
+
 	if err := utils.RemoveFinalizer(ctx, deps, backup, constants.ResticBackupFinalizer); err != nil {
-		log.Errorw("Failed to remove finalizer", "error", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
-	log.Info("Successfully completed backup deletion")
 	return ctrl.Result{}, nil
 }

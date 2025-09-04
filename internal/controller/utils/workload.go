@@ -45,7 +45,7 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc core
 		for _, workload := range workloads {
 			patch := []byte(`{"spec":{"replicas":0}}`)
 			if err := deps.Patch(ctx, workload, client.RawPatch(types.MergePatchType, patch)); err != nil {
-				log.Errorw("Failed to scale down workload", "error", err, "workload", workload.GetName())
+				log.Errorw("Failed to scale down workload", err, "workload", workload.GetName())
 			}
 		}
 
@@ -72,7 +72,7 @@ func ManageWorkloadScaleForPVC(ctx context.Context, deps *Dependencies, pvc core
 
 			patch := []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, info.Replicas))
 			if err := deps.Patch(ctx, wl, client.RawPatch(types.MergePatchType, patch)); err != nil {
-				log.Errorw("Failed to restore replica count", "workload", wl.GetName(), "error", err)
+				log.Errorw("Failed to restore replica count", "workload", wl.GetName(), err)
 				continue
 			}
 			log.Infow("Scaled up workload", "workload", wl.GetName(), "replicas", info.Replicas)
@@ -160,7 +160,7 @@ func ScaleWorkloads(ctx context.Context, c client.Client, pvc corev1.ObjectRefer
 
 		workload, err := findScalableWorkload(ctx, c, owner, pod.Namespace)
 		if err != nil {
-			logger.Errorw("Could not find scalable workload for pod", "error", err, "pod", pod.Name)
+			logger.Errorw("Could not find scalable workload for pod", err, "pod", pod.Name)
 			continue
 		}
 
@@ -176,7 +176,7 @@ func ScaleWorkloads(ctx context.Context, c client.Client, pvc corev1.ObjectRefer
 			// Patch the workload to the desired replica count
 			patch := []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas))
 			if err := c.Patch(ctx, workload, client.RawPatch(types.MergePatchType, patch)); err != nil {
-				logger.Errorw("Failed to scale workload", "error", err, "workload", workload.GetName())
+				logger.Errorw("Failed to scale workload", err, "workload", workload.GetName())
 				// Continue to try scaling other workloads
 				continue
 			}
@@ -224,6 +224,7 @@ func findScalableWorkload(ctx context.Context, c client.Client, owner *metav1.Ow
 	return nil, nil
 }
 
+// @TODO: Use later
 func ShouldStopPods(backupConfig *v1.BackupConfig) bool {
 	selectors := backupConfig.Spec.Selectors
 

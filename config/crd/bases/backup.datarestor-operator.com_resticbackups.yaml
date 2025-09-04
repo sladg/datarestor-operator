@@ -27,6 +27,9 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
+    - jsonPath: .spec.snapshotID
+      name: SnapshotID
+      type: string
     - jsonPath: .status.duration
       name: Duration
       type: string

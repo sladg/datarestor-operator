@@ -45,8 +45,8 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 	// Use the job name from spec if provided, otherwise generate one
 	jobName := spec.JobName
 	if jobName == "" {
-		// Generate a consistent name format: restic-{type}-{owner}-{timestamp}
-		jobName = fmt.Sprintf("restic-%s-%s-%d", spec.JobType, actualOwner.GetName(), time.Now().Unix())
+		// Generate a consistent name format: restic-{type}-{owner}-{timestamp}-{random}
+		jobName = fmt.Sprintf("restic-%s-%s-%d-%d", spec.JobType, actualOwner.GetName(), time.Now().Unix(), time.Now().UnixNano()%1000)
 	}
 
 	labels := map[string]string{
@@ -114,13 +114,25 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 		return corev1.ObjectReference{}, nil, fmt.Errorf("failed to create ConfigMap: %w", err)
 	}
 
-	return corev1.ObjectReference{Name: jobName, Namespace: namespace}, cm, nil
+	// Create validated ObjectReference
+	jobRef, err := CreateObjectReference(jobName, namespace, "Job")
+	if err != nil {
+		return corev1.ObjectReference{}, nil, fmt.Errorf("failed to create job reference: %w", err)
+	}
+
+	return jobRef, cm, nil
 }
 
 // IsJobFinished checks if a job has completed, either successfully or with an error.
 // It returns two booleans: the first indicates if the job is finished,
 // the second indicates if the job was successful.
 func IsJobFinished(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) (finished bool, succeeded bool) {
+	// Validate job reference
+	if err := ValidateObjectReference(job, "Job"); err != nil {
+		deps.Logger.Debugw("Invalid job reference", "error", err)
+		return false, false
+	}
+
 	var jobObj batchv1.Job
 	err := deps.Get(ctx, client.ObjectKey{Name: job.Name, Namespace: job.Namespace}, &jobObj)
 	if err != nil {
@@ -138,6 +150,11 @@ func IsJobFinished(ctx context.Context, deps *Dependencies, job corev1.ObjectRef
 }
 
 func DeleteJob(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) error {
+	// Validate job reference
+	if err := ValidateObjectReference(job, "Job"); err != nil {
+		return fmt.Errorf("invalid job reference: %w", err)
+	}
+
 	var jobObj batchv1.Job
 	if err := deps.Get(ctx, client.ObjectKey{Name: job.Name, Namespace: job.Namespace}, &jobObj); err != nil {
 		// Job not found, nothing to delete

@@ -42,6 +42,7 @@ rules:
   - apps
   resources:
   - deployments
+  - replicasets
   - statefulsets
   verbs:
   - get
@@ -49,41 +50,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - backup.autorestore.com
-  resources:
-  - resticbackups
-  - resticrepositories
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - backup.autorestore.com
-  resources:
-  - resticrestores
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - backup.autorestore.com
-  resources:
-  - resticrestores/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - backup.autorestore.com
-  resources:
-  - resticrestores/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - backup.datarestor-operator.com
   resources:
@@ -105,6 +71,7 @@ rules:
   - backupconfigs/finalizers
   - resticbackups/finalizers
   - resticrepositories/finalizers
+  - resticrestores/finalizers
   verbs:
   - update
 - apiGroups:
@@ -113,6 +80,7 @@ rules:
   - backupconfigs/status
   - resticbackups/status
   - resticrepositories/status
+  - resticrestores/status
   verbs:
   - get
   - patch

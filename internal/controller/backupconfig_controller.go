@@ -6,6 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
@@ -34,11 +35,15 @@ type BackupConfigReconciler struct {
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticrestores,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="apps",resources=deployments;statefulsets,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups="apps",resources=deployments;replicasets;statefulsets,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 
 func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
+	logger := r.Deps.Logger.Named("[BackupConfig]").With("name", req.Name, "namespace", req.Namespace)
+
+	// Create dependencies with the named logger for inheritance
+	deps := *r.Deps
+	deps.Logger = logger
 
 	// Fetch the BackupConfig instance
 	backupConfig := &v1.BackupConfig{}
@@ -47,54 +52,60 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
 			// Return and don't requeue
-			log.Info("BackupConfig resource not found. Ignoring since object must be deleted")
+			logger.Info("BackupConfig resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
-		log.Errorw("Failed to get BackupConfig", "error", err)
+		logger.Errorw("Failed to get BackupConfig", err)
 		return ctrl.Result{}, err
 	}
 
 	// Handle deletion
 	if backupConfig.DeletionTimestamp != nil {
-		return logic.HandleBackupConfigDeletion(ctx, r.Deps, backupConfig)
+		return logic.HandleBackupConfigDeletion(ctx, &deps, backupConfig)
 	}
 
 	// Add finalizer if not present
-	if err := utils.AddFinalizer(ctx, r.Deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
-		log.Errorw("Failed to add finalizer", "error", err)
+	if err := utils.AddFinalizer(ctx, &deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
+		logger.Errorw("Failed to add finalizer", err)
 		return ctrl.Result{}, err
 	}
 
 	// Ensure ResticRepository CRDs exist for all backup targets
-	if err := logic.EnsureResticRepositories(ctx, r.Deps, backupConfig); err != nil {
-		log.Errorw("Failed to ensure restic repositories", "error", err)
+	if err := logic.EnsureResticRepositories(ctx, &deps, backupConfig); err != nil {
+		logger.Errorw("Failed to ensure restic repositories", err)
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	}
+
+	// Update BackupConfig status with repository information
+	if err := logic.UpdateBackupConfigStatus(ctx, &deps, backupConfig); err != nil {
+		logger.Errorw("Failed to update BackupConfig status", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
 	// Discover and match PVCs using BackupConfig selectors
 	pvcList := &corev1.PersistentVolumeClaimList{}
-	pvcs, err := utils.FindMatchingResources[*corev1.PersistentVolumeClaim](ctx, r.Deps, backupConfig.Spec.Selectors, pvcList)
+	pvcs, err := utils.FindMatchingResources[*corev1.PersistentVolumeClaim](ctx, &deps, backupConfig.Spec.Selectors, pvcList)
 	if err != nil {
-		log.Errorw("Failed to find managed PVCs", "error", err)
+		logger.Errorw("Failed to find managed PVCs", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
 	// Handle auto-restore logic
-	if err := logic.HandleAutoRestore(ctx, r.Deps, backupConfig, pvcs); err != nil {
-		log.Errorw("Failed to handle auto-restore", "error", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
-	}
+	// if err := logic.HandleAutoRestore(ctx, &deps, backupConfig, pvcs); err != nil {
+	// 	logger.Errorw("Failed to handle auto-restore", err)
+	// 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	// }
 
 	// Handle manual backup/restore annotations
-	if err := logic.HandleAnnotations(ctx, r.Deps, backupConfig, pvcs); err != nil {
-		log.Errorw("Failed to handle annotations", "error", err)
+	if err := logic.HandleAnnotations(ctx, &deps, backupConfig, pvcs); err != nil {
+		logger.Errorw("Failed to handle annotations", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
 	// Handle scheduled backups on a per-target basis
-	// if err := logic.HandleScheduledBackups(ctx, r.Deps, backupConfig, pvcs); err != nil {
-	// 	log.Errorw("Failed to handle scheduled backups", "error", err)
+	// if err := logic.HandleScheduledBackups(ctx, &deps, backupConfig, pvcs); err != nil {
+	// 	logger.Errorw("Failed to handle scheduled backups",  err)
 	// 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	// }
 
@@ -107,6 +118,7 @@ func (r *BackupConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&v1.ResticRepository{}).
 		Owns(&v1.ResticBackup{}).
 		Owns(&v1.ResticRestore{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Watches(
 			&corev1.PersistentVolumeClaim{},
 			handler.EnqueueRequestsFromMapFunc(watches.FindObjectsForPVC(r.Deps)),

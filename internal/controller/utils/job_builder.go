@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"fmt"
+
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -53,11 +55,24 @@ func BuildRestoreJobSpec(restore *v1.ResticRestore, repository *v1.ResticReposit
 		},
 	}
 
+	args := []string{"--repo", repository.Spec.Target}
+	args = append(args, "--tag", fmt.Sprintf("namespace=%s", restore.Namespace))
+
+	// Add snapshot ID (or latest if not specified)
+	if restore.Spec.SnapshotID != "" {
+		args = append(args, restore.Spec.SnapshotID)
+	} else {
+		args = append(args, "latest")
+	}
+
+	args = append(args, "--target", "/data")
+	args = append(args, restore.Spec.Args...)
+
 	return ResticJobSpec{
 		Namespace:    restore.Spec.TargetPVC.Namespace,
 		JobType:      "restore",
 		Command:      []string{"restic", "restore"},
-		Args:         []string{restore.Spec.SnapshotID, "--target", "/data"},
+		Args:         args,
 		Repository:   repository.Spec.Target,
 		Image:        repository.Spec.Image,
 		Env:          repository.Spec.Env,
@@ -88,11 +103,24 @@ func BuildBackupJobSpec(backup *v1.ResticBackup, repository *v1.ResticRepository
 		},
 	}
 
+	// Build args with tags for traceability
+	args := []string{"--repo", repository.Spec.Target}
+
+	args = append(args, "--tag", fmt.Sprintf("namespace=%s", backup.Namespace))
+
+	if backup.Spec.SnapshotID != "" {
+		// Use the snapshot ID as a tag to identify this backup
+		args = append(args, "--tag", fmt.Sprintf("name=%s", backup.Spec.SnapshotID))
+	}
+
+	args = append(args, "/data")
+	args = append(args, backup.Spec.Args...)
+
 	return ResticJobSpec{
 		Namespace:    backup.Spec.SourcePVC.Namespace,
 		JobType:      "backup",
 		Command:      []string{"restic", "backup"},
-		Args:         []string{"/data"},
+		Args:         args,
 		Repository:   repository.Spec.Target,
 		Image:        repository.Spec.Image,
 		Env:          repository.Spec.Env,

@@ -11,7 +11,7 @@ import (
 // If not found, it assumes the annotation value is a direct snapshot ID.
 func GetSnapshotIDFromAnnotation(ctx context.Context, deps *Dependencies, backupConfig *v1.BackupConfig, annotationValue string) string {
 	if annotationValue == "true" || annotationValue == "now" {
-		return "latest"
+		return "" // Empty string means use latest snapshot
 	}
 
 	// Try to get a ResticBackup by this name first

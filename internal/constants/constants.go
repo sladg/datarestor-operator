@@ -25,6 +25,8 @@ const (
 )
 
 const (
+	QuickRequeueInterval     = 5 * time.Second
 	DefaultRequeueInterval   = 30 * time.Second
-	ImmediateRequeueInterval = 0 * time.Second
+	ImmediateRequeueInterval = 1 * time.Second
+	LongerRequeueInterval    = 120 * time.Second
 )

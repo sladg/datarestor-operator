@@ -6,6 +6,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
@@ -33,15 +34,20 @@ func NewResticBackupReconciler(deps *utils.Dependencies) *ResticBackupReconciler
 
 // Reconcile handles ResticBackup lifecycle
 func (r *ResticBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Deps.Logger.With("name", req.Name, "namespace", req.Namespace)
+	// Create component-specific logger for inheritance
+	logger := r.Deps.Logger.Named("[ResticBackup]").With("name", req.Name, "namespace", req.Namespace)
+
+	// Create dependencies with the named logger for inheritance
+	deps := *r.Deps
+	deps.Logger = logger
 
 	resticBackup := &v1.ResticBackup{}
 	if err := r.Deps.Get(ctx, req.NamespacedName, resticBackup); err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("ResticBackup resource not found. Ignoring since object must be deleted")
+			logger.Info("ResticBackup resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		log.Errorw("Failed to get ResticBackup", "error", err)
+		logger.Errorw("Failed to get ResticBackup", err)
 		return ctrl.Result{}, err
 	}
 
@@ -54,42 +60,30 @@ func (r *ResticBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 	}
 
-	p := resticBackup.Status.Phase
-
-	return utils.ProcessSteps(
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseUnknown || p == v1.PhasePending },
-			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupPending(ctx, r.Deps, resticBackup) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseRunning },
-			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupRunning(ctx, r.Deps, resticBackup) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseCompleted },
-			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupCompleted(ctx, r.Deps, resticBackup) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseFailed },
-			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupFailed(ctx, r.Deps, resticBackup) },
-		},
-		utils.Step{
-			Condition: func() bool { return p == v1.PhaseDeletion },
-			Action:    func() (ctrl.Result, error) { return resticbackup.HandleBackupDeletion(ctx, r.Deps, resticBackup) },
-		},
-		utils.Step{
-			Condition: func() bool { return true }, // Default case
-			Action: func() (ctrl.Result, error) {
-				r.Deps.Logger.Infow("Unknown or unhandled phase", "phase", p)
-				return ctrl.Result{}, fmt.Errorf("unknown or unhandled phase: %s", p)
-			},
-		},
-	)
+	// Handle different phases with dynamic phase checking
+	switch resticBackup.Status.Phase {
+	case v1.PhaseUnknown:
+		return resticbackup.HandleBackupUnknown(ctx, &deps, resticBackup)
+	case v1.PhasePending:
+		return resticbackup.HandleBackupPending(ctx, &deps, resticBackup)
+	case v1.PhaseRunning:
+		return resticbackup.HandleBackupRunning(ctx, &deps, resticBackup)
+	case v1.PhaseCompleted:
+		return resticbackup.HandleBackupCompleted(ctx, &deps, resticBackup)
+	case v1.PhaseFailed:
+		return resticbackup.HandleBackupFailed(ctx, &deps, resticBackup)
+	case v1.PhaseDeletion:
+		return resticbackup.HandleBackupDeletion(ctx, &deps, resticBackup)
+	default:
+		logger.Infow("Unknown or unhandled phase", "phase", resticBackup.Status.Phase)
+		return ctrl.Result{}, fmt.Errorf("unknown or unhandled phase: %s", resticBackup.Status.Phase)
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ResticBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.ResticBackup{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }

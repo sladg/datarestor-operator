@@ -28,3 +28,24 @@ func ShouldPerformBackup(schedule string, lastBackupTime *time.Time) bool {
 	// If next scheduled time is in the past, it's time for a backup
 	return time.Now().After(nextBackup)
 }
+
+// GetNextBackupTime returns the next scheduled backup time for debugging purposes
+func GetNextBackupTime(schedule string, lastBackupTime *time.Time) *time.Time {
+	if schedule == "" {
+		return nil
+	}
+
+	cronSchedule, err := cron.ParseStandard(schedule)
+	if err != nil {
+		return nil
+	}
+
+	var nextTime time.Time
+	if lastBackupTime != nil {
+		nextTime = cronSchedule.Next(*lastBackupTime)
+	} else {
+		nextTime = cronSchedule.Next(time.Now())
+	}
+
+	return &nextTime
+}

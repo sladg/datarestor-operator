@@ -46,7 +46,55 @@ type BackupTarget struct {
 	// +required
 	// +kubebuilder:validation:Pattern=`^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1])) (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$`
 	BackupSchedule string `json:"backupSchedule,omitempty"`
+
+	// Information about the last backup run for this target
+	// +optional
+	LastRun *BackupTargetLastRun `json:"lastRun,omitempty"`
 }
+
+// BackupTargetLastRun contains information about the last backup execution
+type BackupTargetLastRun struct {
+	// Time when the last backup was started
+	// +optional
+	StartTime metav1.Time `json:"startTime,omitempty"`
+
+	// Time when the last backup was completed (successful or failed)
+	// +optional
+	CompletionTime metav1.Time `json:"completionTime,omitempty"`
+
+	// Status of the last backup run
+	// +optional
+	Status BackupTargetStatus `json:"status,omitempty"`
+
+	// Number of PVCs that were successfully backed up
+	// +optional
+	SuccessfulBackups int32 `json:"successfulBackups,omitempty"`
+
+	// Number of PVCs that failed to backup
+	// +optional
+	FailedBackups int32 `json:"failedBackups,omitempty"`
+
+	// Error message if the last run had failures
+	// +optional
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
+// BackupTargetStatus represents the status of a backup target run
+type BackupTargetStatus string
+
+const (
+	// BackupTargetStatusRunning indicates the backup is currently running
+	BackupTargetStatusRunning BackupTargetStatus = "Running"
+
+	// BackupTargetStatusCompleted indicates the backup completed successfully
+	BackupTargetStatusCompleted BackupTargetStatus = "Completed"
+
+	// BackupTargetStatusFailed indicates the backup failed
+	BackupTargetStatusFailed BackupTargetStatus = "Failed"
+
+	// BackupTargetStatusPartial indicates some PVCs succeeded, some failed
+	BackupTargetStatusPartial BackupTargetStatus = "Partial"
+)
 
 // Selector defines how to select PVCs for backup.
 type Selector struct {

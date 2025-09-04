@@ -52,6 +52,11 @@ func fetchPodLogs(ctx context.Context, k8sClient *kubernetes.Clientset, pod *cor
 // GetJobLogs retrieves logs from the most recent pod of a job.
 // It follows a similar pattern to CreateResticJobWithOutput for consistency.
 func GetJobLogs(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) (string, error) {
+	// Validate job reference
+	if err := ValidateObjectReference(job, "Job"); err != nil {
+		return "", fmt.Errorf("invalid job reference: %w", err)
+	}
+
 	var jobObj *batchv1.Job
 	err := deps.Get(ctx, client.ObjectKey{Name: job.Name, Namespace: job.Namespace}, jobObj)
 	if err != nil {
