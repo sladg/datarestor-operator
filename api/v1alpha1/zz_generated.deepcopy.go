@@ -184,6 +184,10 @@ func (in *CommonStatus) DeepCopyInto(out *CommonStatus) {
 		in, out := &in.CompletionTime, &out.CompletionTime
 		*out = (*in).DeepCopy()
 	}
+	if in.FailedTime != nil {
+		in, out := &in.FailedTime, &out.FailedTime
+		*out = (*in).DeepCopy()
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

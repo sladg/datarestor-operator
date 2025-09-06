@@ -350,6 +350,10 @@ spec:
                       error:
                         description: Error message if operation failed
                         type: string
+                      failedTime:
+                        description: Time when the backup failed
+                        format: date-time
+                        type: string
                       phase:
                         description: Current phase of the operation
                         type: string
@@ -612,6 +616,10 @@ spec:
                 type: array
               error:
                 description: Error message if operation failed
+                type: string
+              failedTime:
+                description: Time when the backup failed
+                format: date-time
                 type: string
               initializedTime:
                 description: Time when the repository was last initialized

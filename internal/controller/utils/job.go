@@ -167,3 +167,28 @@ func DeleteJob(ctx context.Context, deps *Dependencies, job corev1.ObjectReferen
 	}
 	return nil
 }
+
+func CleanupJob(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) {
+	log := deps.Logger.Named("[CleanupJob]")
+
+	if job.Name != "" {
+		if err := DeleteJob(ctx, deps, job); err != nil {
+			log.Warnw("Failed to delete job during cleanup", "error", err)
+		}
+	}
+}
+
+func CleanupJobWithLogs(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) string {
+	log := deps.Logger.Named("[CleanupJobWithLogs]")
+
+	if job.Name != "" {
+		if podLogs, _ := GetJobLogs(ctx, deps, job); podLogs != "" {
+			return podLogs
+		}
+
+		if err := DeleteJob(ctx, deps, job); err != nil {
+			log.Warnw("Failed to delete job during cleanup", "error", err)
+		}
+	}
+	return ""
+}

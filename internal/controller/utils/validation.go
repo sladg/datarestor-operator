@@ -111,19 +111,19 @@ func GetRepositoryForOperation(ctx context.Context, deps *Dependencies, namespac
 
 // SetOperationFailed sets the operation status to failed and updates it
 // This is a generic function that works for both backup and restore operations
-func SetOperationFailed(ctx context.Context, deps *Dependencies, obj interface{}, errorMsg string) error {
+func SetOperationFailed(ctx context.Context, deps *Dependencies, obj interface{}, err error) error {
 	log := deps.Logger.Named("operation-failed")
-	log.Errorw("Setting operation to failed state", "error", errorMsg)
+	log.Errorw("Setting operation to failed state", "error", err.Error())
 
 	// Use reflection or type assertion to handle different object types
 	switch operation := obj.(type) {
 	case *v1.ResticBackup:
 		operation.Status.Phase = v1.PhaseFailed
-		operation.Status.Error = errorMsg
+		operation.Status.Error = err.Error()
 		return deps.Status().Update(ctx, operation)
 	case *v1.ResticRestore:
 		operation.Status.Phase = v1.PhaseFailed
-		operation.Status.Error = errorMsg
+		operation.Status.Error = err.Error()
 		return deps.Status().Update(ctx, operation)
 	default:
 		return fmt.Errorf("unsupported operation type: %T", obj)

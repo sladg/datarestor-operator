@@ -236,3 +236,19 @@ func ShouldStopPods(backupConfig *v1.BackupConfig) bool {
 
 	return false
 }
+
+func CleanupBeforeFinale(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object, finalizer string) error {
+	log := deps.Logger.Named("[CleanupBeforeFinalizer]")
+
+	if err := ManageWorkloadScaleForPVC(ctx, deps, pvc, owner, false); err != nil {
+		log.Errorw("Failed to scale up workloads during deletion cleanup", err)
+		return err
+	}
+
+	if err := RemoveFinalizerWithRef(ctx, deps, pvc, finalizer); err != nil {
+		log.Errorw("Failed to remove restore finalizer from PVC during deletion cleanup", err)
+		return err
+	}
+
+	return nil
+}

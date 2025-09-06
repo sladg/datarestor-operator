@@ -53,9 +53,15 @@ kubectl annotate pvc my-pvc backup.datarestor-operator.com/restore-from-backup='
 
 ### Future Work
 
-- [x] Automatically scale associated workloads (Deployments, etc.) up/down when `stopPods` is used.
 - [x] Add finalizers to workloads to prevent pod startup until an auto-restore is complete.
+- [ ] Automatically scale associated workloads (Deployments, etc.) up/down when `stopPods` is used.
 - [ ] Update RBAC to ensure least-privilege permissions.
+- [ ] Enable maintenance on repository - keep last N snapshots, prune old snapshots, verify snapshots.
+- [ ] Add support for snapshot verification.
+- [ ] Verify automatic-populate on newly created PVCs,
+- [ ] Verify manual restore on existing PVC,
+- [ ] Verify manual restore on new PVC (specify other PVC to restore from),
+- [ ] Allow for passing args to backups, restores, etc.
 
 ---
 

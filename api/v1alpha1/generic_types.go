@@ -65,6 +65,10 @@ type CommonStatus struct {
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 
+	// Time when the backup failed
+	// +optional
+	FailedTime *metav1.Time `json:"failedTime,omitempty"`
+
 	// Conditions represent the latest available observations
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

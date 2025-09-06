@@ -30,3 +30,5 @@ const (
 	ImmediateRequeueInterval = 1 * time.Second
 	LongerRequeueInterval    = 120 * time.Second
 )
+
+var ActivePhases = []v1.Phase{v1.PhaseRunning, v1.PhasePending}

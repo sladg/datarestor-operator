@@ -82,3 +82,13 @@ func GenerateUniqueName(backupConfig, pvc, operationType string) string {
 	shortUUID := uuid.New().String()[:6] // Use first 6 characters for cleaner names
 	return fmt.Sprintf("%s-%s", operationType, shortUUID)
 }
+
+// Contains checks if an element is present in a slice.
+func Contains[T comparable](slice []T, element T) bool {
+	for _, item := range slice {
+		if item == element {
+			return true
+		}
+	}
+	return false
+}

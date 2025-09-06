@@ -74,11 +74,12 @@ func (r *ResticRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// Handle deletion
 	if resticRestore.DeletionTimestamp != nil {
-		resticRestore.Status.Phase = v1.PhaseDeletion
-		if err := r.Deps.Status().Update(ctx, resticRestore); err != nil {
-			return ctrl.Result{}, err
+		if utils.Contains(constants.ActivePhases, resticRestore.Status.Phase) {
+			return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, nil
 		}
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
+
+		resticRestore.Status.Phase = v1.PhaseDeletion
+		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, deps.Status().Update(ctx, resticRestore)
 	}
 
 	// Handle different phases with dynamic phase checking

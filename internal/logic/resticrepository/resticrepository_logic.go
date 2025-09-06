@@ -13,22 +13,16 @@ import (
 )
 
 func HandleRepoUnknown(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-unknown")
+	log := deps.Logger.Named("[HandleRepoUnknown]")
 	log.Info("Handling unknown repository", "name", repo.Name, "currentPhase", repo.Status.Phase)
 
-	// Transition from Unknown to Pending
 	repo.Status.Phase = v1.PhasePending
-	if err := deps.Status().Update(ctx, repo); err != nil {
-		log.Errorw("Failed to update repository status", "error", err, "name", repo.Name)
-		return ctrl.Result{}, err
-	}
 
-	log.Info("Repository transitioned to pending phase", "name", repo.Name)
-	return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
+	return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, deps.Status().Update(ctx, repo)
 }
 
 func HandleRepoPending(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-pending")
+	log := deps.Logger.Named("[HandleRepoPending]")
 	log.Info("Handling pending repository", "name", repo.Name)
 
 	// Add the repository finalizer
@@ -94,10 +88,8 @@ func HandleRepoPending(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 	return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 }
 
-// HandleRepoRunning handles the logic when a ResticRepository is in the Running phase.
-// This function is focused on initializing the repository and monitoring the initialization job.
 func HandleRepoRunning(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-running")
+	log := deps.Logger.Named("[HandleRepoRunning]")
 	log.Info("Handling running repository")
 
 	if repo.Status.Job.Name == "" {
@@ -145,56 +137,46 @@ func HandleRepoRunning(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 }
 
 func HandleRepoCompleted(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-completed")
+	log := deps.Logger.Named("[HandleRepoCompleted]")
 	log.Info("Handling completed repository")
 
-	if repo.Status.Job.Name == "" {
+	if repo.Status.InitializedTime == nil {
+		repo.Status.InitializedTime = &metav1.Time{Time: metav1.Now().Time}
+	} else {
 		return ctrl.Result{}, nil
 	}
 
-	if err := utils.DeleteJob(ctx, deps, repo.Status.Job); err != nil {
-		log.Warnw("Failed to clean up completed repository job", err)
-	} else {
-		log.Info("Successfully cleaned up completed backup job")
+	if repo.Status.Job.Name != "" {
+		if err := utils.DeleteJob(ctx, deps, repo.Status.Job); err != nil {
+			log.Warnw("Failed to clean up completed repository job", err)
+		} else {
+			log.Info("Successfully cleaned up completed backup job")
+		}
 	}
 
-	repo.Status.InitializedTime = &metav1.Time{Time: metav1.Now().Time}
-	if err := deps.Status().Update(ctx, repo); err != nil {
-		log.Errorw("Failed to update repository status", err)
-		return ctrl.Result{}, err
-	}
+	repo.Status.Job = corev1.ObjectReference{}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, deps.Status().Update(ctx, repo)
 }
 
 func HandleRepoFailed(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-failed")
+	log := deps.Logger.Named("[HandleRepoFailed]")
 	log.Info("Handling failed repository")
 
-	if repo.Status.Job.Name == "" {
+	if repo.Status.FailedTime != nil {
 		return ctrl.Result{}, nil
 	}
 
-	podLogs, _ := utils.GetJobLogs(ctx, deps, repo.Status.Job)
+	repo.Status.FailedTime = &metav1.Time{Time: metav1.Now().Time}
 
-	repo.Status.Error = fmt.Sprintf("Reason: %s, Message: %s, Logs: %s", "Repository initialization job failed", "Repository initialization job failed", podLogs)
-	log.Errorw("Repository initialization job failed", repo.Status.Error)
+	podLogs := utils.CleanupJobWithLogs(ctx, deps, corev1.ObjectReference{Name: repo.Status.Job.Name, Namespace: repo.Status.Job.Namespace})
+	repo.Status.Error = fmt.Sprintf("Repository job failed. Logs: %s", podLogs)
 
-	if err := utils.UpdateStatusWithRetry(ctx, deps, repo); err != nil {
-		log.Errorw("Failed to update repository status with failure logs", err)
-	}
-
-	if err := utils.DeleteJob(ctx, deps, repo.Status.Job); err != nil {
-		log.Errorw("Failed to clean up failed repository job", err)
-	} else {
-		log.Info("Successfully cleaned up failed repository job")
-	}
-
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, utils.UpdateStatusWithRetry(ctx, deps, repo)
 }
 
 func HandleRepoDeletion(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
-	log := deps.Logger.Named("repo-deletion")
+	log := deps.Logger.Named("[HandleRepoDeletion]")
 
 	// Check for active backups using this repository
 	backups, err := utils.FindBackupsByRepository(ctx, deps, repo.Namespace, repo.Name)
@@ -204,7 +186,7 @@ func HandleRepoDeletion(ctx context.Context, deps *utils.Dependencies, repo *v1.
 	}
 
 	for _, backup := range backups {
-		if backup.Status.Phase == v1.PhaseRunning {
+		if utils.Contains(constants.ActivePhases, backup.Status.Phase) {
 			log.Infow("Repository has active backups", "backup", backup.Name)
 			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 		}
@@ -218,7 +200,7 @@ func HandleRepoDeletion(ctx context.Context, deps *utils.Dependencies, repo *v1.
 	}
 
 	for _, restore := range restores {
-		if restore.Status.Phase == v1.PhaseRunning {
+		if utils.Contains(constants.ActivePhases, restore.Status.Phase) {
 			log.Infow("Repository has active restores", "restore", restore.Name)
 			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 		}
