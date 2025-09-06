@@ -9,7 +9,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
-	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	"github.com/sladg/datarestor-operator/internal/logic/resticbackup"
 )
@@ -53,12 +52,7 @@ func (r *ResticBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Handle deletion
 	if resticBackup.DeletionTimestamp != nil {
-		if utils.Contains(constants.ActivePhases, resticBackup.Status.Phase) {
-			return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, nil
-		}
-
-		resticBackup.Status.Phase = v1.PhaseDeletion
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, deps.Status().Update(ctx, resticBackup)
+		return resticbackup.HandleBackupDeletion(ctx, &deps, resticBackup)
 	}
 
 	// Handle different phases with dynamic phase checking

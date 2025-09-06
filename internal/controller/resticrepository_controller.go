@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
-	constants "github.com/sladg/datarestor-operator/internal/constants"
 	utils "github.com/sladg/datarestor-operator/internal/controller/utils"
 	"github.com/sladg/datarestor-operator/internal/logic/resticrepository"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -67,12 +66,7 @@ func (r *ResticRepositoryReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Handle deletion
 	if resticRepo.DeletionTimestamp != nil {
-		if utils.Contains(constants.ActivePhases, resticRepo.Status.Phase) {
-			return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, nil
-		}
-
-		resticRepo.Status.Phase = v1.PhaseDeletion
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, deps.Status().Update(ctx, resticRepo)
+		return resticrepository.HandleRepoDeletion(ctx, &deps, resticRepo)
 	}
 
 	// Handle different phases with dynamic phase checking

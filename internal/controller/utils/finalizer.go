@@ -9,64 +9,129 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// ContainsFinalizer checks if a finalizer is present on the object
-func ContainsFinalizer(obj client.Object, finalizer string) bool {
-	return controllerutil.ContainsFinalizer(obj, finalizer)
+type OperationType string
+
+const (
+	FinalizerOperation  OperationType = "finalizer"
+	AnnotationOperation OperationType = "annotation"
+)
+
+type BulkOperationParams struct {
+	Objects   []corev1.ObjectReference
+	Map       map[string]*string // Map of annotation/finalizer key to value (nil means remove)
+	Operation OperationType
 }
 
-func ContainsFinalizerWithRef(ctx context.Context, deps *Dependencies, obj corev1.ObjectReference, finalizer string) bool {
-	// Get the PVC directly since we know it's a PVC
-	var pvc corev1.PersistentVolumeClaim
-	err := deps.Get(ctx, client.ObjectKey{Name: obj.Name, Namespace: obj.Namespace}, &pvc)
-	if err != nil {
-		return false
+func setFinalizers(ctx context.Context, deps *Dependencies, obj client.Object, mapFinalizers map[string]*string) error {
+	finalizers := obj.GetFinalizers()
+
+	if finalizers == nil {
+		finalizers = make([]string, 0)
 	}
-	return ContainsFinalizer(&pvc, finalizer)
+
+	for fianlizer, value := range mapFinalizers {
+		if value == nil {
+			for i, f := range finalizers {
+				if f == fianlizer {
+					finalizers = append(finalizers[:i], finalizers[i+1:]...)
+					break
+				}
+			}
+		} else {
+			finalizers = append(finalizers, fianlizer)
+		}
+	}
+
+	obj.SetFinalizers(finalizers)
+
+	return deps.Update(ctx, obj)
 }
 
-// AddFinalizer adds a finalizer to a resource if it doesn't exist
-func AddFinalizer(ctx context.Context, deps *Dependencies, obj client.Object, finalizer string) error {
-	if ContainsFinalizer(obj, finalizer) {
-		return nil
+func setAnnotations(ctx context.Context, deps *Dependencies, obj client.Object, mapAnnotations map[string]*string) error {
+	annotations := obj.GetAnnotations()
+
+	if annotations == nil {
+		annotations = make(map[string]string)
 	}
+
+	// Set the annotation
+	for annotation, value := range mapAnnotations {
+		if value == nil {
+			delete(annotations, annotation)
+		} else {
+			annotations[annotation] = *value
+		}
+	}
+	obj.SetAnnotations(annotations)
+
+	return deps.Update(ctx, obj)
+}
+
+func ApplyBulkFinalizer(ctx context.Context, deps *Dependencies, params BulkOperationParams) error {
+	for _, obj := range params.Objects {
+		var resource client.Object
+		if err := deps.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: obj.Name}, resource); err != nil {
+			return fmt.Errorf("failed to get %s: %w", obj.Name, err)
+		}
+
+		if err := setFinalizers(ctx, deps, resource, params.Map); err != nil {
+			return fmt.Errorf("failed to set finalizers for %s: %w", obj.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func ApplyBulkAnnotation(ctx context.Context, deps *Dependencies, params BulkOperationParams) error {
+	for _, obj := range params.Objects {
+		var resource client.Object
+		if err := deps.Get(ctx, client.ObjectKey{Namespace: obj.Namespace, Name: obj.Name}, resource); err != nil {
+			return fmt.Errorf("failed to get %s: %w", obj.Name, err)
+		}
+
+		if err := setAnnotations(ctx, deps, resource, params.Map); err != nil {
+			return fmt.Errorf("failed to set annotations for %s: %w", obj.Name, err)
+		}
+	}
+
+	return nil
+}
+
+func CheckFinalizerOnPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, finalizer string) bool {
+	var resource client.Object
+	if err := deps.Get(ctx, client.ObjectKey{Namespace: pvc.Namespace, Name: pvc.Name}, resource); err != nil {
+		return true
+	}
+
+	return controllerutil.ContainsFinalizer(resource, finalizer)
+}
+
+func SetOwnFinalizer(ctx context.Context, deps *Dependencies, obj client.Object, finalizer string) error {
 	controllerutil.AddFinalizer(obj, finalizer)
-	if err := UpdateObjectWithRetry(ctx, deps, obj); err != nil {
-		return fmt.Errorf("failed to add finalizer: %w", err)
+
+	if err := deps.Update(ctx, obj); err != nil {
+		return fmt.Errorf("failed to set finalizer on %s: %w", obj.GetName(), err)
 	}
+
 	return nil
 }
 
-func AddFinalizerWithRef(ctx context.Context, deps *Dependencies, obj corev1.ObjectReference, finalizer string) error {
-	// Get the PVC directly since we know it's a PVC
-	var pvc corev1.PersistentVolumeClaim
-	err := deps.Get(ctx, client.ObjectKey{Name: obj.Name, Namespace: obj.Namespace}, &pvc)
-	if err != nil {
-		return fmt.Errorf("failed to get PVC: %w", err)
+func RemoveOwnFinalizer(ctx context.Context, deps *Dependencies, obj client.Object, finalizer string) error {
+	controllerutil.RemoveFinalizer(obj, finalizer)
+
+	if err := deps.Update(ctx, obj); err != nil {
+		return fmt.Errorf("failed to remove finalizer from %s: %w", obj.GetName(), err)
 	}
 
-	return AddFinalizer(ctx, deps, &pvc, finalizer)
+	return nil
 }
 
-func RemoveFinalizer(ctx context.Context, deps *Dependencies, obj client.Object, finalizer string) error {
-	if !ContainsFinalizer(obj, finalizer) {
-		deps.Logger.Debugw("Finalizer not found", "finalizer", finalizer, "obj", obj.GetName())
+func RemoveOwnAnnotation(ctx context.Context, deps *Dependencies, obj client.Object, annotation string) error {
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
 		return nil
 	}
-	controllerutil.RemoveFinalizer(obj, finalizer)
-	if err := UpdateObjectWithRetry(ctx, deps, obj); err != nil {
-		return fmt.Errorf("failed to remove finalizer: %w", err)
-	}
 
-	deps.Logger.Debugw("Finalizer removed", "finalizer", finalizer, "obj", obj.GetName())
-	return nil
-}
-
-func RemoveFinalizerWithRef(ctx context.Context, deps *Dependencies, obj corev1.ObjectReference, finalizer string) error {
-	// Get the PVC directly since we know it's a PVC
-	var pvc corev1.PersistentVolumeClaim
-	err := deps.Get(ctx, client.ObjectKey{Name: obj.Name, Namespace: obj.Namespace}, &pvc)
-	if err != nil {
-		return fmt.Errorf("failed to get PVC: %w", err)
-	}
-	return RemoveFinalizer(ctx, deps, &pvc, finalizer)
+	delete(annotations, annotation)
+	return deps.Update(ctx, obj)
 }

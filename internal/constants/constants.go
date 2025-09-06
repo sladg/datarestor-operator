@@ -18,10 +18,20 @@ const (
 )
 
 const (
-	AnnotationManualBackup  = v1.OperatorDomain + "/manual-backup"  // Trigger manual backup
-	AnnotationManualRestore = v1.OperatorDomain + "/manual-restore" // Trigger manual restore
+	// Trigger manual backup with optional snapshot ID (e.g., `now`, `latest`, or specific ID)
+	AnnotationManualBackup = v1.OperatorDomain + "/manual-backup"
+
+	// Trigger manual restore. It allows for annotation such as `latest`, `now`, or specific snapshot IDs.
+	// It also allows for specifying `pvcName#snapshotID` to restore from other PVC snapshots. Use "pvcName#now".
+	AnnotationManualRestore = v1.OperatorDomain + "/manual-restore"
 
 	AnnotationOriginalReplicas = v1.OperatorDomain + "/original-replicas" // Store replica counts
+
+	// Backup args, such as --exclude patterns
+	AnnotationBackupArgs = v1.OperatorDomain + "/backup-args"
+
+	// Restore args, such as --include patterns
+	AnnotationRestoreArgs = v1.OperatorDomain + "/restore-args"
 )
 
 const (
@@ -29,6 +39,7 @@ const (
 	DefaultRequeueInterval   = 30 * time.Second
 	ImmediateRequeueInterval = 1 * time.Second
 	LongerRequeueInterval    = 120 * time.Second
+	VeryLongRequeueInterval  = 300 * time.Second
 )
 
 var ActivePhases = []v1.Phase{v1.PhaseRunning, v1.PhasePending}

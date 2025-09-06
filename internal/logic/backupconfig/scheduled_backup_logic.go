@@ -11,7 +11,8 @@ import (
 
 // HandleScheduledBackups handles scheduled backups on a per-target basis.
 func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, managedPVCs []*corev1.PersistentVolumeClaim) error {
-	log := deps.Logger.Named("scheduled-backups")
+	log := deps.Logger.Named("[HandleScheduledBackups]")
+	deps.Logger = log
 
 	if len(managedPVCs) == 0 {
 		log.Debug("No PVCs to backup")
@@ -37,7 +38,8 @@ func HandleScheduledBackups(ctx context.Context, deps *utils.Dependencies, backu
 
 // processScheduledTarget handles scheduling for a single backup target
 func processScheduledTarget(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, targetIndex int, target v1.BackupTarget, managedPVCs []*corev1.PersistentVolumeClaim) (processed, created, skipped int32) {
-	log := deps.Logger.Named("target-scheduler")
+	log := deps.Logger.Named("[processScheduledTarget]")
+	deps.Logger = log
 
 	// Skip targets without a schedule
 	if target.BackupSchedule == "" {
@@ -85,7 +87,8 @@ func validateRepositoryForBackup(ctx context.Context, deps *utils.Dependencies, 
 
 // createScheduledBackupsForTarget creates scheduled backups for all PVCs in a target
 func createScheduledBackupsForTarget(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, targetIndex int, target v1.BackupTarget, managedPVCs []*corev1.PersistentVolumeClaim) int32 {
-	log := deps.Logger.Named("backup-creator")
+	log := deps.Logger.Named("[createScheduledBackupsForTarget]")
+	deps.Logger = log
 
 	// Mark target as running in the status
 	if err := updateBackupTargetLastRun(ctx, deps, backupConfig, targetIndex, v1.BackupTargetStatusRunning, 0, 0, ""); err != nil {
@@ -101,7 +104,6 @@ func createScheduledBackupsForTarget(ctx context.Context, deps *utils.Dependenci
 			PVC:        pvc,
 			Repository: target.Repository,
 			BackupType: v1.BackupTypeScheduled,
-			SnapshotID: "", // Scheduled backups don't specify snapshot ID
 		}
 
 		if err := CreateBackupForPVC(ctx, deps, backupConfig, req); err != nil {

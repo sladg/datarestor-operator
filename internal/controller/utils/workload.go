@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -13,7 +14,72 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
 )
+
+// workloadInfo is a temporary struct used for (un)marshalling replica counts.
+type workloadInfo struct {
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	Replicas int32  `json:"replicas"`
+}
+
+func GetOriginalReplicasInfo(ctx context.Context, deps *Dependencies, workloads []client.Object) (map[string]workloadInfo, error) {
+	originalReplicas := make(map[string]workloadInfo)
+	for _, workload := range workloads {
+		switch w := workload.(type) {
+		case *appsv1.Deployment:
+			originalReplicas[string(w.UID)] = workloadInfo{Kind: "Deployment", Name: w.Name, Replicas: *w.Spec.Replicas}
+		case *appsv1.StatefulSet:
+			originalReplicas[string(w.UID)] = workloadInfo{Kind: "StatefulSet", Name: w.Name, Replicas: *w.Spec.Replicas}
+		}
+	}
+
+	return originalReplicas, nil
+}
+
+func SetOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, owner client.Object, originalReplicas map[string]workloadInfo) error {
+	jsonData, err := json.Marshal(originalReplicas)
+	if err != nil {
+		return fmt.Errorf("failed to marshal original replica counts: %w", err)
+	}
+
+	annotations := owner.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+
+	annotations[constants.AnnotationOriginalReplicas] = string(jsonData)
+	owner.SetAnnotations(annotations)
+
+	return deps.Update(ctx, owner)
+}
+
+func LoadOriginalReplicasFromAnnotation(owner client.Object) (map[string]workloadInfo, error) {
+	annotations := owner.GetAnnotations()
+	jsonData, ok := annotations[constants.AnnotationOriginalReplicas]
+	if !ok || jsonData == "" {
+		return nil, nil // No annotation found, not an error.
+	}
+
+	originalReplicas := map[string]workloadInfo{}
+	if err := json.Unmarshal([]byte(jsonData), &originalReplicas); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal original replica counts: %w", err)
+	}
+	return originalReplicas, nil
+}
+
+// RemoveOriginalReplicasAnnotation removes the original replica count annotation from the owner.
+func RemoveOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, owner client.Object) error {
+	annotations := owner.GetAnnotations()
+	if _, ok := annotations[constants.AnnotationOriginalReplicas]; !ok {
+		return nil // Annotation doesn't exist, nothing to do.
+	}
+
+	delete(annotations, constants.AnnotationOriginalReplicas)
+	owner.SetAnnotations(annotations)
+	return deps.Update(ctx, owner)
+}
 
 // ManageWorkloadScaleForPVC handles scaling workloads up or down for a given PVC.
 // It manages finalizers and annotations on the owner object.
@@ -237,18 +303,29 @@ func ShouldStopPods(backupConfig *v1.BackupConfig) bool {
 	return false
 }
 
-func CleanupBeforeFinale(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object, finalizer string) error {
-	log := deps.Logger.Named("[CleanupBeforeFinalizer]")
+type PrepareFinalizeParams struct {
+	Finalizer string
+	Owner     client.Object
+	PVC       *corev1.ObjectReference
+	ScaleDown bool
+}
 
-	if err := ManageWorkloadScaleForPVC(ctx, deps, pvc, owner, false); err != nil {
-		log.Errorw("Failed to scale up workloads during deletion cleanup", err)
-		return err
+func LockUnlockForOperation(ctx context.Context, deps *Dependencies, params PrepareFinalizeParams) {
+	log := deps.Logger.Named("[LockForOperation]")
+
+	resources := []corev1.ObjectReference{{Namespace: params.Owner.GetNamespace(), Name: params.Owner.GetName()}}
+	if params.PVC != nil {
+		resources = append(resources, *params.PVC)
 	}
 
-	if err := RemoveFinalizerWithRef(ctx, deps, pvc, finalizer); err != nil {
-		log.Errorw("Failed to remove restore finalizer from PVC during deletion cleanup", err)
-		return err
+	if err := ApplyBulkFinalizer(ctx, deps, BulkOperationParams{
+		Objects: resources,
+		Map:     map[string]*string{params.Finalizer: nil},
+	}); err != nil {
+		log.Warn("Failed to add finalizer to resources", err)
 	}
 
-	return nil
+	if err := ManageWorkloadScaleForPVC(ctx, deps, *params.PVC, params.Owner, params.ScaleDown); err != nil {
+		log.Warn("Failed to scale down workloads during operation preparation", err)
+	}
 }

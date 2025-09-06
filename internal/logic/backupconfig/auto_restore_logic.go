@@ -12,7 +12,9 @@ import (
 
 // HandleAutoRestore handles the auto-restore logic for newly claimed PVCs.
 func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, managedPVCs []*corev1.PersistentVolumeClaim) error {
-	log := deps.Logger.Named("handle-auto-restore")
+	log := deps.Logger.Named("[HandleAutoRestore]")
+	deps.Logger = log
+
 	if !backupConfig.Spec.AutoRestore {
 		return nil
 	}
@@ -32,7 +34,6 @@ func HandleAutoRestore(ctx context.Context, deps *utils.Dependencies, backupConf
 				PVC:         pvc,
 				Repository:  target.Repository,
 				RestoreType: v1.RestoreTypeAutomated,
-				SnapshotID:  "", // Auto-restore uses latest/empty
 			}
 			if err := CreateRestoreForPVC(ctx, deps, backupConfig, req); err != nil {
 				continue // Continue with other targets even if one fails

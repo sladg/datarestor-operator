@@ -66,7 +66,7 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// Add finalizer if not present
-	if err := utils.AddFinalizer(ctx, &deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
+	if err := utils.SetOwnFinalizer(ctx, &deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
 		logger.Errorw("Failed to add finalizer", err)
 		return ctrl.Result{}, err
 	}
@@ -98,9 +98,11 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// }
 
 	// Handle manual backup/restore annotations
-	if err := logic.HandleAnnotations(ctx, &deps, backupConfig, pvcs); err != nil {
+	if reconcile, res, err := logic.HandleAnnotations(ctx, &deps, backupConfig, pvcs); err != nil {
 		logger.Errorw("Failed to handle annotations", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	} else if reconcile {
+		return res, err
 	}
 
 	// Handle scheduled backups on a per-target basis

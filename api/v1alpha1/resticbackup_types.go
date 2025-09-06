@@ -42,13 +42,9 @@ type ResticBackupSpec struct {
 	SourcePVC corev1.ObjectReference `json:"sourcePVC"`
 
 	// Arguments to pass to restic restore command
-	// Examples: ["--path", "/data", "--include", "*.sql", "--exclude", "cache/"]
+	// Examples: ["--include", "*.sql", "--exclude", "cache/"]
 	// +optional
 	Args []string `json:"args,omitempty"`
-
-	// Specific snapshot ID to restore from (optional, uses latest if not specified)
-	// +optional
-	SnapshotID string `json:"snapshotID,omitempty"`
 }
 
 // ResticBackupStatus defines the observed state of ResticBackup (merged with BackupJob)
@@ -63,10 +59,6 @@ type ResticBackupStatus struct {
 	// Duration of the backup job as a string.
 	// +optional
 	Duration metav1.Duration `json:"duration,omitempty"`
-
-	// Time when the backup was created in the repository
-	// +optional
-	CreatedAt metav1.Time `json:"createdAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -75,7 +67,6 @@ type ResticBackupStatus struct {
 // +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.sourcePVC.name"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
-// +kubebuilder:printcolumn:name="SnapshotID",type="string",JSONPath=".spec.snapshotID"
 // +kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

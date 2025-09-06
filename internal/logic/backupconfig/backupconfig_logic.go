@@ -10,13 +10,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-func HandleBackupConfigDeletion(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig) (ctrl.Result, error) {
-	if err := utils.RemoveFinalizer(ctx, deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-	}
-	return ctrl.Result{}, nil
-}
-
 func UpdateBackupConfigStatus(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig) error {
 	ownedRepos, err := findOwnedRepositories(ctx, deps, backupConfig)
 	if err != nil {
@@ -30,4 +23,11 @@ func UpdateBackupConfigStatus(ctx context.Context, deps *utils.Dependencies, bac
 	}
 
 	return nil
+}
+
+func HandleBackupConfigDeletion(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig) (ctrl.Result, error) {
+	if err := utils.RemoveOwnFinalizer(ctx, deps, backupConfig, constants.BackupConfigFinalizer); err != nil {
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
+	}
+	return ctrl.Result{}, nil
 }

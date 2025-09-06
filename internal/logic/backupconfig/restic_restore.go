@@ -2,7 +2,6 @@ package logic
 
 import (
 	"context"
-	"fmt"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
@@ -16,24 +15,26 @@ type RestoreRequest struct {
 	PVC         *corev1.PersistentVolumeClaim
 	Repository  corev1.ObjectReference
 	RestoreType v1.RestoreType
-	SnapshotID  string // "latest", "now", specific ID, or empty for default behavior
 }
 
 // CreateRestoreForPVC creates a restore for a PVC with flexible parameters
 func CreateRestoreForPVC(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, req RestoreRequest) error {
-	log := deps.Logger.Named("create-restore-pvc")
+	log := deps.Logger.Named("[CreateRestoreForPVC]")
+	deps.Logger = log
 
 	// Create TargetPVC reference
-	targetPVC, err := utils.CreateObjectReference(req.PVC.Name, req.PVC.Namespace, "TargetPVC")
+	targetPVC, err := utils.CreateObjectReference(req.PVC.Name, req.PVC.Namespace)
 	if err != nil {
 		log.Warnw("Failed to create TargetPVC reference", err)
 		return err
 	}
 
 	// Generate restore names
-	restoreName := utils.GenerateUniqueName(backupConfig.Name, req.PVC.Name, string(req.RestoreType))
-	shortHash := restoreName[len(restoreName)-6:]
-	restoreSpecName := fmt.Sprintf("%s-%s-%s", req.Repository.Name, req.PVC.Name, shortHash)
+	restoreName, restoreSpecName := utils.GenerateUniqueName(utils.UniqueNameParams{
+		BackupConfig:  backupConfig.Name,
+		PVC:           req.PVC.Name,
+		OperationType: string(req.RestoreType),
+	})
 
 	// Create the ResticRestore CRD directly
 	restore := &v1.ResticRestore{
@@ -46,7 +47,6 @@ func CreateRestoreForPVC(ctx context.Context, deps *utils.Dependencies, backupCo
 			Repository: req.Repository,
 			TargetPVC:  targetPVC,
 			Type:       req.RestoreType,
-			SnapshotID: req.SnapshotID,
 		},
 		Status: v1.ResticRestoreStatus{
 			CommonStatus: v1.CommonStatus{

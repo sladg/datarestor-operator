@@ -10,33 +10,30 @@ import (
 // BuildInitJobSpec builds the spec for a repository initialization job.
 func BuildInitJobSpec(repository *v1.ResticRepository) ResticJobSpec {
 	return ResticJobSpec{
-		Namespace:  repository.Namespace,
-		JobType:    "init",
-		Command:    []string{"restic", "init"},
-		Args:       []string{"--repo", repository.Spec.Target},
-		Repository: repository.Spec.Target,
-		Image:      repository.Spec.Image,
-		Env:        repository.Spec.Env,
-		Owner:      repository,
+		Namespace: repository.Namespace,
+		JobType:   "init",
+		Args:      []string{"restic", "init", "--repo", repository.Spec.Target},
+		Image:     repository.Spec.Image,
+		Env:       repository.Spec.Env,
+		Owner:     repository,
 	}
 }
 
 // BuildCheckJobSpec builds the spec for a repository check job.
 func BuildCheckJobSpec(repository *v1.ResticRepository) ResticJobSpec {
 	return ResticJobSpec{
-		Namespace:  repository.Namespace,
-		JobType:    "check",
-		Command:    []string{"restic", "check"},
-		Args:       []string{"--repo", repository.Spec.Target},
-		Repository: repository.Spec.Target,
-		Image:      repository.Spec.Image,
-		Env:        repository.Spec.Env,
-		Owner:      repository,
+		Namespace: repository.Namespace,
+		JobType:   "check",
+		Args:      []string{"restic", "check", "--repo", repository.Spec.Target},
+		Image:     repository.Spec.Image,
+		Env:       repository.Spec.Env,
+		Owner:     repository,
 	}
 }
 
 // BuildRestoreJobSpec builds the spec for a restore job.
-func BuildRestoreJobSpec(restore *v1.ResticRestore, repository *v1.ResticRepository) ResticJobSpec {
+// args must include NAME (aka. latest, or snapshot ID)
+func BuildRestoreJobSpec(restore *v1.ResticRestore, repository *v1.ResticRepository, args []string) ResticJobSpec {
 	volumeMounts := []corev1.VolumeMount{
 		{
 			Name:      "data",
@@ -55,25 +52,20 @@ func BuildRestoreJobSpec(restore *v1.ResticRestore, repository *v1.ResticReposit
 		},
 	}
 
-	args := []string{"--repo", repository.Spec.Target}
-	args = append(args, "--tag", fmt.Sprintf("namespace=%s", restore.Namespace))
-
-	// Add snapshot ID (or latest if not specified)
-	if restore.Spec.SnapshotID != "" {
-		args = append(args, restore.Spec.SnapshotID)
-	} else {
-		args = append(args, "latest")
+	jobArgs := []string{
+		"restic", "restore",
+		"--repo", repository.Spec.Target,
+		// --host is set based on the annotation. it might be other PVC name
+		"--tag", fmt.Sprintf("name=%s", restore.Spec.Name),
+		"--target", "/data",
 	}
 
-	args = append(args, "--target", "/data")
-	args = append(args, restore.Spec.Args...)
+	jobArgs = append(jobArgs, args...)
 
 	return ResticJobSpec{
 		Namespace:    restore.Spec.TargetPVC.Namespace,
 		JobType:      "restore",
-		Command:      []string{"restic", "restore"},
-		Args:         args,
-		Repository:   repository.Spec.Target,
+		Args:         jobArgs,
 		Image:        repository.Spec.Image,
 		Env:          repository.Spec.Env,
 		VolumeMounts: volumeMounts,
@@ -83,7 +75,8 @@ func BuildRestoreJobSpec(restore *v1.ResticRestore, repository *v1.ResticReposit
 }
 
 // BuildBackupJobSpec builds the spec for a backup job.
-func BuildBackupJobSpec(backup *v1.ResticBackup, repository *v1.ResticRepository) ResticJobSpec {
+// args must include NAME (aka. latest, or snapshot ID)
+func BuildBackupJobSpec(repository *v1.ResticRepository, backup *v1.ResticBackup, args []string) ResticJobSpec {
 	volumeMounts := []corev1.VolumeMount{
 		{
 			Name:      "data",
@@ -103,25 +96,21 @@ func BuildBackupJobSpec(backup *v1.ResticBackup, repository *v1.ResticRepository
 		},
 	}
 
-	// Build args with tags for traceability
-	args := []string{"--repo", repository.Spec.Target}
-
-	args = append(args, "--tag", fmt.Sprintf("namespace=%s", backup.Namespace))
-
-	if backup.Spec.SnapshotID != "" {
-		// Use the snapshot ID as a tag to identify this backup
-		args = append(args, "--tag", fmt.Sprintf("name=%s", backup.Spec.SnapshotID))
+	// Build restic backup command arguments
+	jobArgs := []string{
+		"restic", "backup",
+		"--repo", repository.Spec.Target,
+		"--host", fmt.Sprintf("%s-%s", backup.Spec.SourcePVC.Namespace, backup.Spec.SourcePVC.Name),
+		"--tag", fmt.Sprintf("name=%s", backup.Spec.Name),
+		"--target", "/data",
 	}
 
-	args = append(args, "/data")
-	args = append(args, backup.Spec.Args...)
+	jobArgs = append(jobArgs, args...)
 
 	return ResticJobSpec{
 		Namespace:    backup.Spec.SourcePVC.Namespace,
 		JobType:      "backup",
-		Command:      []string{"restic", "backup"},
-		Args:         args,
-		Repository:   repository.Spec.Target,
+		Args:         jobArgs,
 		Image:        repository.Spec.Image,
 		Env:          repository.Spec.Env,
 		VolumeMounts: volumeMounts,

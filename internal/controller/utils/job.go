@@ -15,14 +15,11 @@ import (
 
 // ResticJobSpec defines the specification for a restic job
 type ResticJobSpec struct {
-	JobName      string
 	Namespace    string
 	JobType      string
-	Repository   string
-	Command      []string
+	Image        string
 	Args         []string
 	Env          []corev1.EnvVar
-	Image        string
 	VolumeMounts []corev1.VolumeMount
 	Volumes      []corev1.Volume
 	Owner        metav1.Object
@@ -42,17 +39,12 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 		namespace = spec.Namespace
 	}
 
-	// Use the job name from spec if provided, otherwise generate one
-	jobName := spec.JobName
-	if jobName == "" {
-		// Generate a consistent name format: restic-{type}-{owner}-{timestamp}-{random}
-		jobName = fmt.Sprintf("restic-%s-%s-%d-%d", spec.JobType, actualOwner.GetName(), time.Now().Unix(), time.Now().UnixNano()%1000)
-	}
+	// Generate a consistent name format: restic-{type}-{owner}-{timestamp}-{random}
+	jobName := fmt.Sprintf("restic-%s-%s-%d-%d", spec.JobType, actualOwner.GetName(), time.Now().Unix(), time.Now().UnixNano()%1000)
 
 	labels := map[string]string{
 		"app.kubernetes.io/managed-by": v1.OperatorDomain,
 		"app.kubernetes.io/instance":   actualOwner.GetName(),
-		"job-type":                     spec.JobType,
 	}
 
 	// Create job
@@ -63,14 +55,14 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 			Labels:    labels,
 		},
 		Spec: batchv1.JobSpec{
-			BackoffLimit: &[]int32{4}[0],
+			BackoffLimit: &[]int32{1}[0],
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
 							Name:         "restic",
 							Image:        spec.Image,
-							Command:      append(spec.Command, spec.Args...),
+							Command:      spec.Args,
 							Env:          spec.Env,
 							VolumeMounts: spec.VolumeMounts,
 						},
@@ -115,7 +107,7 @@ func CreateResticJobWithOutput(ctx context.Context, deps *Dependencies, spec Res
 	}
 
 	// Create validated ObjectReference
-	jobRef, err := CreateObjectReference(jobName, namespace, "Job")
+	jobRef, err := CreateObjectReference(jobName, namespace)
 	if err != nil {
 		return corev1.ObjectReference{}, nil, fmt.Errorf("failed to create job reference: %w", err)
 	}
@@ -176,19 +168,4 @@ func CleanupJob(ctx context.Context, deps *Dependencies, job corev1.ObjectRefere
 			log.Warnw("Failed to delete job during cleanup", "error", err)
 		}
 	}
-}
-
-func CleanupJobWithLogs(ctx context.Context, deps *Dependencies, job corev1.ObjectReference) string {
-	log := deps.Logger.Named("[CleanupJobWithLogs]")
-
-	if job.Name != "" {
-		if podLogs, _ := GetJobLogs(ctx, deps, job); podLogs != "" {
-			return podLogs
-		}
-
-		if err := DeleteJob(ctx, deps, job); err != nil {
-			log.Warnw("Failed to delete job during cleanup", "error", err)
-		}
-	}
-	return ""
 }

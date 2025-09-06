@@ -2,7 +2,6 @@ package logic
 
 import (
 	"context"
-	"fmt"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
@@ -16,24 +15,25 @@ type BackupRequest struct {
 	PVC        *corev1.PersistentVolumeClaim
 	Repository corev1.ObjectReference
 	BackupType v1.BackupType
-	SnapshotID string // optional, can be empty for default behavior
 }
 
 // CreateBackupForPVC creates a backup for a PVC with flexible parameters
 func CreateBackupForPVC(ctx context.Context, deps *utils.Dependencies, backupConfig *v1.BackupConfig, req BackupRequest) error {
-	log := deps.Logger.Named("create-backup-pvc")
+	log := deps.Logger.Named("[CreateBackupForPVC]")
+	deps.Logger = log
 
 	// Create SourcePVC reference
-	sourcePVC, err := utils.CreateObjectReference(req.PVC.Name, req.PVC.Namespace, "SourcePVC")
+	sourcePVC, err := utils.CreateObjectReference(req.PVC.Name, req.PVC.Namespace)
 	if err != nil {
 		log.Warnw("Failed to create SourcePVC reference", err)
 		return err
 	}
 
-	// Generate backup names
-	backupName := utils.GenerateUniqueName(backupConfig.Name, req.PVC.Name, string(req.BackupType))
-	shortHash := backupName[len(backupName)-6:]
-	backupSpecName := fmt.Sprintf("%s-%s-%s", req.Repository.Name, req.PVC.Name, shortHash)
+	backupName, backupSpecName := utils.GenerateUniqueName(utils.UniqueNameParams{
+		BackupConfig:  backupConfig.Name,
+		PVC:           req.PVC.Name,
+		OperationType: string(req.BackupType),
+	})
 
 	// Create the ResticBackup CRD directly
 	backup := &v1.ResticBackup{
@@ -46,7 +46,6 @@ func CreateBackupForPVC(ctx context.Context, deps *utils.Dependencies, backupCon
 			Repository: req.Repository,
 			SourcePVC:  sourcePVC,
 			Type:       req.BackupType,
-			SnapshotID: req.SnapshotID,
 		},
 		Status: v1.ResticBackupStatus{
 			CommonStatus: v1.CommonStatus{

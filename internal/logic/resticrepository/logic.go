@@ -18,22 +18,16 @@ func HandleRepoUnknown(ctx context.Context, deps *utils.Dependencies, repo *v1.R
 
 	repo.Status.Phase = v1.PhasePending
 
+	if err := utils.SetOwnFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, deps.Status().Update(ctx, repo)
 }
 
 func HandleRepoPending(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
 	log := deps.Logger.Named("[HandleRepoPending]")
 	log.Info("Handling pending repository", "name", repo.Name)
-
-	// Add the repository finalizer
-	if err := utils.AddFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer); err != nil {
-		log.Errorw("Failed to add finalizer", err)
-		repo.Status.Phase = v1.PhaseFailed
-		if err := deps.Status().Update(ctx, repo); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
-	}
 
 	if repo.Status.Job.Name == "" {
 		jobSpec := utils.BuildCheckJobSpec(repo)
@@ -140,20 +134,15 @@ func HandleRepoCompleted(ctx context.Context, deps *utils.Dependencies, repo *v1
 	log := deps.Logger.Named("[HandleRepoCompleted]")
 	log.Info("Handling completed repository")
 
-	if repo.Status.InitializedTime == nil {
-		repo.Status.InitializedTime = &metav1.Time{Time: metav1.Now().Time}
-	} else {
+	// Already terminal stage
+	if repo.Status.CompletionTime != nil {
 		return ctrl.Result{}, nil
 	}
 
-	if repo.Status.Job.Name != "" {
-		if err := utils.DeleteJob(ctx, deps, repo.Status.Job); err != nil {
-			log.Warnw("Failed to clean up completed repository job", err)
-		} else {
-			log.Info("Successfully cleaned up completed backup job")
-		}
-	}
+	utils.CleanupJob(ctx, deps, corev1.ObjectReference{Name: repo.Status.Job.Name, Namespace: repo.Status.Job.Namespace})
 
+	repo.Status.InitializedTime = &metav1.Time{Time: metav1.Now().Time}
+	repo.Status.CompletionTime = &metav1.Time{Time: metav1.Now().Time}
 	repo.Status.Job = corev1.ObjectReference{}
 
 	return ctrl.Result{}, deps.Status().Update(ctx, repo)
@@ -167,49 +156,23 @@ func HandleRepoFailed(ctx context.Context, deps *utils.Dependencies, repo *v1.Re
 		return ctrl.Result{}, nil
 	}
 
-	repo.Status.FailedTime = &metav1.Time{Time: metav1.Now().Time}
+	utils.CleanupJob(ctx, deps, corev1.ObjectReference{Name: repo.Status.Job.Name, Namespace: repo.Status.Job.Namespace})
 
-	podLogs := utils.CleanupJobWithLogs(ctx, deps, corev1.ObjectReference{Name: repo.Status.Job.Name, Namespace: repo.Status.Job.Namespace})
-	repo.Status.Error = fmt.Sprintf("Repository job failed. Logs: %s", podLogs)
+	repo.Status.FailedTime = &metav1.Time{Time: metav1.Now().Time}
+	repo.Status.Error = fmt.Sprintf("Repository job failed. Logs: %s", "NOT IMPLEMENTED")
 
 	return ctrl.Result{}, utils.UpdateStatusWithRetry(ctx, deps, repo)
 }
 
 func HandleRepoDeletion(ctx context.Context, deps *utils.Dependencies, repo *v1.ResticRepository) (ctrl.Result, error) {
 	log := deps.Logger.Named("[HandleRepoDeletion]")
+	deps.Logger = log
 
-	// Check for active backups using this repository
-	backups, err := utils.FindBackupsByRepository(ctx, deps, repo.Namespace, repo.Name)
-	if err != nil {
-		log.Errorw("Failed to list backups", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	if utils.Contains(constants.ActivePhases, repo.Status.Phase) {
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
 	}
 
-	for _, backup := range backups {
-		if utils.Contains(constants.ActivePhases, backup.Status.Phase) {
-			log.Infow("Repository has active backups", "backup", backup.Name)
-			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-		}
-	}
+	log.Info("Handling repository deletion. Everything should be cleaned up.")
 
-	// Check for active restores using this repository
-	restores, err := utils.FindRestoresByRepository(ctx, deps, repo.Namespace, repo.Name)
-	if err != nil {
-		log.Errorw("Failed to list restores", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
-	}
-
-	for _, restore := range restores {
-		if utils.Contains(constants.ActivePhases, restore.Status.Phase) {
-			log.Infow("Repository has active restores", "restore", restore.Name)
-			return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil
-		}
-	}
-
-	if err := utils.RemoveFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer); err != nil {
-		log.Errorw("Failed to remove finalizer", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
-	}
-
-	return ctrl.Result{}, nil
+	return ctrl.Result{}, utils.RemoveOwnFinalizer(ctx, deps, repo, constants.ResticRepositoryFinalizer)
 }

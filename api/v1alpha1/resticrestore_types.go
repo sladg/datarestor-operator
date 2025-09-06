@@ -42,10 +42,6 @@ type ResticRestoreSpec struct {
 	// Examples: ["--path", "/data", "--include", "*.sql", "--exclude", "cache/"]
 	// +optional
 	Args []string `json:"args,omitempty"`
-
-	// Specific snapshot ID to restore from (optional, uses latest if not specified)
-	// +optional
-	SnapshotID string `json:"snapshotID,omitempty"`
 }
 
 // ResticRestoreStatus defines the observed state of ResticRestore
@@ -60,16 +56,12 @@ type ResticRestoreStatus struct {
 	// Duration of the restore operation
 	// +optional
 	Duration metav1.Duration `json:"duration,omitempty"`
-
-	// Time when the backup was created in the repository
-	// +optional
-	CreatedAt metav1.Time `json:"createdAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Backup",type="string",JSONPath=".spec.name"
-// +kubebuilder:printcolumn:name="Target PVC",type="string",JSONPath=".spec.targetPVC.name"
+// +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.targetPVC.name"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
 // +kubebuilder:printcolumn:name="Duration",type="string",JSONPath=".status.duration"

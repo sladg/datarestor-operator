@@ -61,12 +61,12 @@ func ValidateObjectReference(ref corev1.ObjectReference, refName string) error {
 }
 
 // CreateObjectReference creates a validated ObjectReference with proper error handling
-func CreateObjectReference(name, namespace string, refName string) (corev1.ObjectReference, error) {
+func CreateObjectReference(name string, namespace string) (corev1.ObjectReference, error) {
 	if name == "" {
-		return corev1.ObjectReference{}, fmt.Errorf("%s name cannot be empty", refName)
+		return corev1.ObjectReference{}, fmt.Errorf("name cannot be empty")
 	}
 	if namespace == "" {
-		return corev1.ObjectReference{}, fmt.Errorf("%s namespace cannot be empty", refName)
+		return corev1.ObjectReference{}, fmt.Errorf("namespace cannot be empty")
 	}
 
 	return corev1.ObjectReference{
@@ -75,12 +75,22 @@ func CreateObjectReference(name, namespace string, refName string) (corev1.Objec
 	}, nil
 }
 
+type UniqueNameParams struct {
+	BackupConfig  string
+	PVC           string
+	OperationType string
+}
+
 // GenerateUniqueName creates a unique name for backup/restore resources
 // Format: {type}-{shortUUID} - Keep it simple and clean
 // The short UUID ensures uniqueness even in high-frequency scenarios
-func GenerateUniqueName(backupConfig, pvc, operationType string) string {
+func GenerateUniqueName(params UniqueNameParams) (string, string) {
 	shortUUID := uuid.New().String()[:6] // Use first 6 characters for cleaner names
-	return fmt.Sprintf("%s-%s", operationType, shortUUID)
+
+	uniqueName := fmt.Sprintf("%s-%s-%s-%s", params.BackupConfig, params.PVC, params.OperationType, shortUUID)
+	businessName := fmt.Sprintf("%s-%s-%s", params.BackupConfig, params.PVC, params.OperationType)
+
+	return uniqueName, businessName
 }
 
 // Contains checks if an element is present in a slice.
