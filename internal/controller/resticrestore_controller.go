@@ -21,9 +21,9 @@ import (
 	"fmt"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	"github.com/sladg/datarestor-operator/internal/logic/resticrestore"
-	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
@@ -62,18 +62,19 @@ func (r *ResticRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// Fetch the ResticRestore instance
 	resticRestore := &v1.ResticRestore{}
-	if err := r.Deps.Get(ctx, req.NamespacedName, resticRestore); err != nil {
-		if errors.IsNotFound(err) {
-			logger.Info("ResticRestore resource not found. Ignoring...")
-			return ctrl.Result{}, nil
-		}
-		logger.Errorw("Failed to get ResticRestore", err)
-		return ctrl.Result{}, err
+	isNotFound, isError := utils.IsObjectNotFound(ctx, r.Deps, resticRestore)
+	if isNotFound {
+		return ctrl.Result{}, nil
+	} else if isError {
+		return ctrl.Result{}, fmt.Errorf("failed to get ResticRestore")
 	}
 
 	// Handle deletion
 	if resticRestore.DeletionTimestamp != nil {
-		return resticrestore.HandleRestoreDeletion(ctx, &deps, resticRestore)
+		// If in active state, allow the rest of code to continue processing
+		if !utils.Contains(constants.ActivePhases, resticRestore.Status.Phase) {
+			return resticrestore.HandleRestoreDeletion(ctx, &deps, resticRestore)
+		}
 	}
 
 	// Handle different phases with dynamic phase checking

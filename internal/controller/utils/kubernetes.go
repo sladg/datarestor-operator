@@ -102,3 +102,21 @@ func Contains[T comparable](slice []T, element T) bool {
 	}
 	return false
 }
+
+func IsObjectNotFound(ctx context.Context, deps *Dependencies, obj client.Object) (bool, bool) {
+	log := deps.Logger.Named("[IsObjectNotFound]")
+
+	err := deps.Get(ctx, types.NamespacedName{Name: obj.GetName(), Namespace: obj.GetNamespace()}, obj)
+	isNotFound := client.IgnoreNotFound(err) != nil
+	if err != nil {
+		log.Errorw("Failed to get object", err)
+
+		return false, true
+	} else if isNotFound {
+		log.Info("Object not found - must be deleted, ignoring")
+
+		return true, false
+	}
+
+	return false, false
+}

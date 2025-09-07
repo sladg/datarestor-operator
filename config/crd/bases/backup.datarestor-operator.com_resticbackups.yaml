@@ -27,9 +27,6 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .spec.snapshotID
-      name: SnapshotID
-      type: string
     - jsonPath: .status.duration
       name: Duration
       type: string
@@ -64,7 +61,7 @@ spec:
               args:
                 description: |-
                   Arguments to pass to restic restore command
-                  Examples: ["--path", "/data", "--include", "*.sql", "--exclude", "cache/"]
+                  Examples: ["--include", "*.sql", "--exclude", "cache/"]
                 items:
                   type: string
                 type: array
@@ -114,10 +111,6 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              snapshotID:
-                description: Specific snapshot ID to restore from (optional, uses
-                  latest if not specified)
-                type: string
               sourcePVC:
                 description: PVC that was/is being backed up
                 properties:
@@ -239,10 +232,6 @@ spec:
                   - type
                   type: object
                 type: array
-              createdAt:
-                description: Time when the backup was created in the repository
-                format: date-time
-                type: string
               duration:
                 description: Duration of the backup job as a string.
                 type: string

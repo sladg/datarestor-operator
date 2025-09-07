@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	"github.com/sladg/datarestor-operator/internal/logic/resticbackup"
 )
@@ -41,18 +41,19 @@ func (r *ResticBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	deps.Logger = logger
 
 	resticBackup := &v1.ResticBackup{}
-	if err := r.Deps.Get(ctx, req.NamespacedName, resticBackup); err != nil {
-		if errors.IsNotFound(err) {
-			logger.Info("ResticBackup resource not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, nil
-		}
-		logger.Errorw("Failed to get ResticBackup", err)
-		return ctrl.Result{}, err
+	isNotFound, isError := utils.IsObjectNotFound(ctx, r.Deps, resticBackup)
+	if isNotFound {
+		return ctrl.Result{}, nil
+	} else if isError {
+		return ctrl.Result{}, fmt.Errorf("failed to get ResticBackup")
 	}
 
 	// Handle deletion
 	if resticBackup.DeletionTimestamp != nil {
-		return resticbackup.HandleBackupDeletion(ctx, &deps, resticBackup)
+		// If in active state, allow the rest of code to continue processing
+		if !utils.Contains(constants.ActivePhases, resticBackup.Status.Phase) {
+			return resticbackup.HandleBackupDeletion(ctx, &deps, resticBackup)
+		}
 	}
 
 	// Handle different phases with dynamic phase checking

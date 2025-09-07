@@ -2,9 +2,9 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -47,22 +47,19 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// Fetch the BackupConfig instance
 	backupConfig := &v1.BackupConfig{}
-	if err := r.Deps.Get(ctx, req.NamespacedName, backupConfig); err != nil {
-		if errors.IsNotFound(err) {
-			// Request object not found, could have been deleted after reconcile request.
-			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
-			// Return and don't requeue
-			logger.Info("BackupConfig resource not found. Ignoring since object must be deleted")
-			return ctrl.Result{}, nil
-		}
-		// Error reading the object - requeue the request.
-		logger.Errorw("Failed to get BackupConfig", err)
-		return ctrl.Result{}, err
+	isNotFound, isError := utils.IsObjectNotFound(ctx, r.Deps, backupConfig)
+	if isNotFound {
+		return ctrl.Result{}, nil
+	} else if isError {
+		return ctrl.Result{}, fmt.Errorf("failed to get BackupConfig")
 	}
 
 	// Handle deletion
 	if backupConfig.DeletionTimestamp != nil {
-		return logic.HandleBackupConfigDeletion(ctx, &deps, backupConfig)
+		// If in active state, allow the rest of code to continue processing
+		if !utils.Contains(constants.ActivePhases, backupConfig.Status.Phase) {
+			return logic.HandleBackupConfigDeletion(ctx, &deps, backupConfig)
+		}
 	}
 
 	// Add finalizer if not present
@@ -77,17 +74,17 @@ func (r *BackupConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
-	// Update BackupConfig status with repository information
-	if err := logic.UpdateBackupConfigStatus(ctx, &deps, backupConfig); err != nil {
-		logger.Errorw("Failed to update BackupConfig status", err)
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
-	}
-
 	// Discover and match PVCs using BackupConfig selectors
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	pvcs, err := utils.FindMatchingResources[*corev1.PersistentVolumeClaim](ctx, &deps, backupConfig.Spec.Selectors, pvcList)
 	if err != nil {
 		logger.Errorw("Failed to find managed PVCs", err)
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
+	}
+
+	// Update BackupConfig status with repository information
+	if err := logic.UpdateBackupConfigStatus(ctx, &deps, backupConfig, pvcs); err != nil {
+		logger.Errorw("Failed to update BackupConfig status", err)
 		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, err
 	}
 
