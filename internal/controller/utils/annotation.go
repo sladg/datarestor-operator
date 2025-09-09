@@ -11,7 +11,9 @@ func MakeAnnotation(existing map[string]string, new map[string]string) map[strin
 	}
 
 	for k, v := range new {
-		if v == "" { // Blank annotation removes it
+		if v == "" {
+			// Empty value should remove the key if it exists
+			delete(result, k)
 			continue
 		}
 		result[k] = v

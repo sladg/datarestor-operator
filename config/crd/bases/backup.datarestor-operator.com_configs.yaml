@@ -24,7 +24,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: BackupConfig is the Schema for the backupconfigs API
+        description: Config is the Schema for the configs API
         properties:
           apiVersion:
             description: |-
@@ -44,7 +44,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of BackupConfig
+            description: spec defines the desired state of Config
             properties:
               autoRestore:
                 default: true

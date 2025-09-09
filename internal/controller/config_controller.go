@@ -28,37 +28,25 @@ type ConfigReconciler struct {
 	Deps *utils.Dependencies
 }
 
-// Maybe following: resticbackup's
-
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
-
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=resticbackups/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
-
-// ----
-
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=configs,verbs=get;list;watch;create;update;patch;delete
+// ConfigReconciler RBAC permissions
+// Core resources the controller manages:
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=configs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=configs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=configs/finalizers,verbs=update
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=tasks,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=tasks/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=tasks/finalizers,verbs=update
+//
+// Tasks the controller creates:
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=tasks,verbs=get;list;watch;create
+//
+// Kubernetes resources the controller interacts with:
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;update;patch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="apps",resources=deployments;replicasets;statefulsets,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="apps",resources=deployments;replicasets;statefulsets,verbs=get;list;watch;update;patch
 
 //nolint:gocyclo
 func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.Deps.Logger.Named("[ConfigReconciler]").With("name", req.Name, "namespace", req.Namespace)
-	r.Deps.Logger = logger
+	logger.Info("Config reconciliation")
 
 	// Selectors can be provided on backupconfig-level or on repository-level (repository level takes precedence).
 	// AutoRestore and StopPods can be provided on backupconfig-level or on repository-level (repository level takes precedence).
@@ -70,16 +58,20 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	config := &v1.Config{}
 	isNotFound, isError := utils.IsObjectNotFound(ctx, r.Deps, req, config)
 	if isNotFound {
+		logger.Warn("Config not found, might have been deleted")
 		return ctrl.Result{}, nil
 	} else if isError {
+		logger.Error("Failed to get Config")
 		return ctrl.Result{}, fmt.Errorf("failed to get Config")
 	}
 
 	// If deleting, allow it. Remove any tasks references and remove finalizer
 	if config.DeletionTimestamp != nil {
+		logger.Infow("Config is being deleted, cleaning up tasks ...", "config", config.Name, "deletionTimestamp", config.DeletionTimestamp)
 		err := task_util.RemoveTasksByConfig(ctx, r.Deps, config)
 		if err != nil {
 			controllerutil.RemoveFinalizer(config, constants.ConfigFinalizer)
+			_ = r.Deps.Update(ctx, config)
 		}
 		return ctrl.Result{}, err
 	}
@@ -88,20 +80,50 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// If not initiliazed yet, add finalizer
 	if config.Status.InitializedAt.IsZero() {
+		logger.Infow("Config not initialized yet, initializing...", "name", config.Name, "namespace", config.Namespace)
+
 		controllerutil.AddFinalizer(config, constants.ConfigFinalizer)
 		config.Status.InitializedAt = &now
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, r.Deps.Update(ctx, config)
+
+		// Initialize status repositories from spec repositories
+		config.Status.Repositories = make([]v1.RepositorySpec, len(config.Spec.Repositories))
+		for i, repo := range config.Spec.Repositories {
+			config.Status.Repositories[i] = v1.RepositorySpec{
+				Target:         repo.Target,
+				Priority:       repo.Priority,
+				Env:            repo.Env,
+				BackupSchedule: repo.BackupSchedule,
+				Selectors:      repo.Selectors,
+				Status: v1.RepositoryStatus{
+					Target:                 repo.Target,
+					Backups:                []string{},
+					InitializedAt:          nil,
+					LastScheduledBackupRun: nil,
+				},
+			}
+		}
+
+		logger.Infow("Config initialized, adding finalizer", "finalizer", constants.ConfigFinalizer)
+		if err := r.Deps.Status().Update(ctx, config); err != nil {
+			logger.Errorw("Failed to update Config status after initialization", "error", err)
+			return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, err
+		}
+
+		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, nil
 	}
 
 	// --------- Initialization done, processing ---------
 
 	// If not initialized yet, run restic check + restic init and update the initialized --> rerun
 	reconcile := false
-	for _, repository := range config.Status.Repositories {
+	for i := range config.Status.Repositories {
+		repository := &config.Status.Repositories[i]
 		if repository.Status.InitializedAt.IsZero() {
 			logger.Infow("Repository not initialized yet", "repository", repository.Target)
 
-			output, err := restic.ExecCheck(ctx, repository.Target, config.Spec.Env)
+			mergedEnv := restic.MergeEnvs(config.Spec.Env, repository.Env)
+
+			output, err := restic.ExecCheck(ctx, logger, repository.Target, mergedEnv)
 			if err == nil {
 				logger.Infow("Repository checked", "output", output)
 				repository.Status.InitializedAt = &now
@@ -110,7 +132,7 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 			reconcile = true
 
-			output, err = restic.ExecInit(ctx, repository.Target, config.Spec.Env)
+			output, err = restic.ExecInit(ctx, logger, repository.Target, mergedEnv)
 			if err == nil {
 				logger.Infow("Repository initialized", "output", output)
 				repository.Status.InitializedAt = &now
@@ -122,7 +144,8 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 	if reconcile {
-		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, r.Deps.Update(ctx, config)
+		logger.Infow("Reconcile needed", "config", config.Name)
+		return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, r.Deps.Status().Update(ctx, config)
 	}
 
 	// All managed PVCs (which match selectors)
@@ -138,17 +161,21 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		for _, pvc := range unclaimedPVCs {
 			logger.Infow("New unclaimed PVC detected", "pvc", pvc.Name)
 
-			args := restic.MakeRestoreArgs(restic.MakeArgsParams{
+			params := restic.MakeArgsParams{
 				Repositories: config.Spec.Repositories,
 				Env:          config.Spec.Env,
 				TargetPVC:    pvc,
 				Annotation:   "", // Let Task figure out best restore point
-			})
+			}
+			args := restic.MakeRestoreArgs(params)
+			selectedRepo := restic.SelectRepository(params)
+			mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
 
 			// Create restore task for each PVC
 			restoreTask := task_util.BuildTask(task_util.BuildTaskParams{
+				Config:   config,
 				PVC:      pvc,
-				Env:      config.Spec.Env,
+				Env:      mergedEnv,
 				Args:     args,
 				TaskType: v1.TaskTypeRestoreAutomated,
 			})
@@ -178,16 +205,20 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 		for _, pvc := range managedPVCs {
 			// Prepare restore args
-			args := restic.MakeRestoreArgs(restic.MakeArgsParams{
+			params := restic.MakeArgsParams{
 				Repositories: config.Spec.Repositories,
 				Env:          config.Spec.Env,
 				TargetPVC:    pvc,
 				Annotation:   config.Annotations[constants.AnnRestore],
-			})
+			}
+			args := restic.MakeRestoreArgs(params)
+			selectedRepo := restic.SelectRepository(params)
+			mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
 			// Prepare restore task for pvc
 			restoreTask := task_util.BuildTask(task_util.BuildTaskParams{
+				Config:   config,
 				PVC:      pvc,
-				Env:      config.Spec.Env,
+				Env:      mergedEnv,
 				Args:     args,
 				TaskType: v1.TaskTypeRestoreManual,
 			})
@@ -210,16 +241,20 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		logger.Infow("Force backup annotation detected, removing ...")
 
 		for _, pvc := range managedPVCs {
-			args := restic.MakeBackupArgs(restic.MakeArgsParams{
+			params := restic.MakeArgsParams{
 				Repositories: config.Spec.Repositories,
 				Env:          config.Spec.Env,
 				TargetPVC:    pvc,
 				Annotation:   config.Annotations[constants.AnnBackup],
-			})
+			}
+			args := restic.MakeBackupArgs(params)
+			selectedRepo := restic.SelectRepository(params)
+			mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
 
 			backupTask := task_util.BuildTask(task_util.BuildTaskParams{
+				Config:   config,
 				PVC:      pvc,
-				Env:      config.Spec.Env,
+				Env:      mergedEnv,
 				Args:     args,
 				TaskType: v1.TaskTypeBackupManual,
 			})
@@ -244,16 +279,20 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if pvc.Annotations[constants.AnnRestore] != "" {
 			logger.Infow("Restore annotation detected on PVC", "pvc", pvc.Name)
 
-			args := restic.MakeRestoreArgs(restic.MakeArgsParams{
+			params := restic.MakeArgsParams{
 				Repositories: config.Spec.Repositories,
 				Env:          config.Spec.Env,
 				TargetPVC:    pvc,
 				Annotation:   pvc.Annotations[constants.AnnRestore],
-			})
+			}
+			args := restic.MakeRestoreArgs(params)
+			selectedRepo := restic.SelectRepository(params)
+			mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
 
 			restoreTask := task_util.BuildTask(task_util.BuildTaskParams{
+				Config:   config,
 				PVC:      pvc,
-				Env:      config.Spec.Env,
+				Env:      mergedEnv,
 				Args:     args,
 				TaskType: v1.TaskTypeRestoreManual,
 			})
@@ -277,16 +316,20 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if pvc.Annotations[constants.AnnBackup] != "" {
 			logger.Infow("Backup annotation detected on PVC", "pvc", pvc.Name)
 
-			args := restic.MakeBackupArgs(restic.MakeArgsParams{
+			params := restic.MakeArgsParams{
 				Repositories: config.Spec.Repositories,
 				Env:          config.Spec.Env,
 				TargetPVC:    pvc,
 				Annotation:   pvc.Annotations[constants.AnnBackup],
-			})
+			}
+			args := restic.MakeBackupArgs(params)
+			selectedRepo := restic.SelectRepository(params)
+			mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
 
 			backupTask := task_util.BuildTask(task_util.BuildTaskParams{
+				Config:   config,
 				PVC:      pvc,
-				Env:      config.Spec.Env,
+				Env:      mergedEnv,
 				Args:     args,
 				TaskType: v1.TaskTypeBackupManual,
 			})
@@ -323,23 +366,36 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 
 		for _, pvc := range managedPVCs {
-			annotations := utils.MakeAnnotation(pvc.Annotations, map[string]string{
-				// @TODO: Fix this
-				constants.AnnBackup: repository.Target,
-			})
-			pvc.SetAnnotations(annotations)
+			// Build restic args for this repository and pvc
+			params := restic.MakeArgsParams{
+				Repositories: []v1.RepositorySpec{repository},
+				Env:          config.Spec.Env,
+				TargetPVC:    pvc,
+				Annotation:   "now",
+			}
+			args := restic.MakeBackupArgs(params)
+			selectedRepo := restic.SelectRepository(params)
+			mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
 
-			if err := r.Deps.Update(ctx, pvc); err != nil {
-				logger.Errorw("Failed to mark PVC for backup", "pvc", pvc.Name, "error", err)
+			backupTask := task_util.BuildTask(task_util.BuildTaskParams{
+				Config:   config,
+				PVC:      pvc,
+				Env:      mergedEnv,
+				Args:     args,
+				TaskType: v1.TaskTypeBackupScheduled,
+			})
+
+			if err := r.Deps.Create(ctx, &backupTask); err != nil {
+				logger.Errorw("Failed to create scheduled backup task for PVC", "pvc", pvc.Name, "error", err)
 			} else {
-				logger.Infow("Marked PVC for backup", "pvc", pvc.Name)
+				logger.Infow("Created scheduled backup task for PVC", "pvc", pvc.Name)
 			}
 		}
 
 		repository.Status.LastScheduledBackupRun = &now
 
 		// We have scheduled lot of backups, let them process before reconcile again
-		return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, r.Deps.Update(ctx, config)
+		return ctrl.Result{RequeueAfter: constants.LongerRequeueInterval}, r.Deps.Status().Update(ctx, config)
 	}
 
 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, r.Deps.Status().Update(ctx, config)
@@ -348,7 +404,6 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 func (r *ConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.Config{}).
-		Owns(&v1.Task{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Watches(
 			&v1.Config{},

@@ -11,13 +11,13 @@ COPY go.sum go.sum
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
+# Build restic binary from our dependency (ensures version consistency)
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o restic-binary github.com/restic/restic/cmd/restic
+
 # Copy the go source
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY internal/ internal/
-
-# Build restic binary from our dependency (ensures version consistency)
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o restic-binary github.com/restic/restic/cmd/restic
 
 # Build the manager binary
 # the GOARCH has not a default value to allow the binary be built according to the host where the command

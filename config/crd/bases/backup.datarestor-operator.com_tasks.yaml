@@ -63,6 +63,10 @@ spec:
                   or {hostName}#{backupName} or {backupName}
                 pattern: ^[a-zA-Z0-9-]+#([a-zA-Z0-9-]+#)?[a-zA-Z0-9-]+$
                 type: string
+              jobTemplate:
+                description: Job template - if not specified, job will fail
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
               name:
                 description: Name of the task
                 type: string

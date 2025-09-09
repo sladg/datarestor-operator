@@ -17,7 +17,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 1Gi
+      storage: 100Mi
   storageClassName: standard
 ---
 apiVersion: apps/v1
@@ -87,3 +87,29 @@ spec:
       port: 9001
       targetPort: 9001
   type: ClusterIP
+
+---
+# Job to initialize required buckets in MinIO using mc
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-minio-buckets
+  namespace: backup-test
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              until mc alias set myminio http://minio.backup-test:9000 minioadmin minioadmin >/dev/null 2>&1; do
+                echo "waiting for minio (mc alias set)..."
+                sleep 2
+              done
+              mc mb -p myminio/onsite-backups || true
+              mc mb -p myminio/offsite-backups || true

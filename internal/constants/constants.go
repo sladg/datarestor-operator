@@ -16,8 +16,8 @@ const (
 )
 
 const (
-	ConfigFinalizer = v1.OperatorDomain + "/backupconfig-finalizer" // BackupConfig finalizer
-	TaskFinalizer   = v1.OperatorDomain + "/task-finalizer"         // Task finalizer
+	ConfigFinalizer = v1.OperatorDomain + "/config-finalizer" // Config finalizer
+	TaskFinalizer   = v1.OperatorDomain + "/task-finalizer"   // Task finalizer
 )
 
 const (
@@ -43,7 +43,7 @@ const (
 const (
 	QuickRequeueInterval     = 5 * time.Second
 	DefaultRequeueInterval   = 30 * time.Second
-	ImmediateRequeueInterval = 1 * time.Second
+	ImmediateRequeueInterval = 2 * time.Second
 	LongerRequeueInterval    = 120 * time.Second
 	VeryLongRequeueInterval  = 300 * time.Second
 	MaxAgeForNewPVC          = 15 * time.Minute

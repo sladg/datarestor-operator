@@ -173,7 +173,7 @@ type ConfigSpec struct {
 // +kubebuilder:printcolumn:name="PVCs",type="integer",JSONPath=".status.matchedPVCsCount"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-// BackupConfig is the Schema for the backupconfigs API
+// Config is the Schema for the configs API
 type Config struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -181,7 +181,7 @@ type Config struct {
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec defines the desired state of BackupConfig
+	// spec defines the desired state of Config
 	// +required
 	Spec ConfigSpec `json:"spec"`
 

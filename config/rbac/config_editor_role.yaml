@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: datarestor-operator
     app.kubernetes.io/managed-by: kustomize
-  name: backupconfig-editor-role
+  name: config-editor-role
 rules:
   - apiGroups:
       - backup.datarestor-operator.com
     resources:
-      - backupconfigs
+      - configs
     verbs:
       - create
       - delete
@@ -28,6 +28,6 @@ rules:
   - apiGroups:
       - backup.datarestor-operator.com
     resources:
-      - backupconfigs/status
+      - configs/status
     verbs:
       - get

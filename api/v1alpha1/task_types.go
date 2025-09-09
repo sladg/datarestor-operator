@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -47,9 +48,11 @@ type TaskSpec struct {
 	// +kubebuilder:validation:Enum=backup-scheduled;backup-manual;restore-manual;restore-automated
 	Type TaskType `json:"type"`
 
-	// Job template - if not specified, defaults will be used
+	// Job template - if not specified, job will fail
 	// +optional
-	JobTemplate batchv1.JobSpec `json:"-"`
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Type=object
+	JobTemplate apiextensionsv1.JSON `json:"jobTemplate,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task

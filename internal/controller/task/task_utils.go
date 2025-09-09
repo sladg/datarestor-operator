@@ -29,3 +29,29 @@ func RemoveTasksByConfig(ctx context.Context, deps *utils.Dependencies, config *
 
 	return nil
 }
+
+// GetTasksStatus aggregates statistics from a list of tasks
+func GetTasksStatus(tasks *v1alpha1.TaskList) v1alpha1.ConfigStatistics {
+	stats := v1alpha1.ConfigStatistics{}
+
+	for _, task := range tasks.Items {
+		// Only count backup tasks for statistics
+		if task.Spec.Type != v1alpha1.TaskTypeBackupScheduled && task.Spec.Type != v1alpha1.TaskTypeBackupManual {
+			continue
+		}
+
+		jobStatus := task.Status.JobStatus
+
+		// Check job status based on Kubernetes JobStatus fields
+		if jobStatus.Succeeded > 0 {
+			stats.SuccessfulBackups++
+		} else if jobStatus.Failed > 0 {
+			stats.FailedBackups++
+		} else if jobStatus.Active > 0 {
+			stats.RunningBackups++
+		}
+		// Note: Jobs with 0 Active, 0 Succeeded, 0 Failed are considered pending/not started
+	}
+
+	return stats
+}

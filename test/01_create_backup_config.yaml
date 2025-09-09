@@ -1,98 +1,45 @@
-apiVersion: backup.datarestor-operator.com/v1alpha1
-kind: ResticRepository
+apiVersion: v1
+kind: Namespace
 metadata:
-  name: restic-onsite
-spec:
-  target: s3:http://minio.backup-test:9000/onsite-backups
-  env:
-    - name: RESTIC_PASSWORD
-      value: mySuperSecret123
-    - name: AWS_ACCESS_KEY_ID
-      value: minioadmin
-    - name: AWS_SECRET_ACCESS_KEY
-      value: minioadmin
+  name: backup-test-config
 ---
 apiVersion: backup.datarestor-operator.com/v1alpha1
-kind: ResticRepository
-metadata:
-  name: restic-offsite
-spec:
-  target: s3:http://minio.backup-test:9000/offsite-backups
-  env:
-    - name: RESTIC_PASSWORD
-      value: myCloudSecretKey123
-    - name: AWS_ACCESS_KEY_ID
-      value: minioadmin
-    - name: AWS_SECRET_ACCESS_KEY
-      value: minioadmin
----
-apiVersion: backup.datarestor-operator.com/v1alpha1
-kind: BackupConfig
+kind: Config
 metadata:
   name: restic-backups
+  namespace: backup-test-config
 spec:
+  autoRestore: true
+  stopPods: true
+
   selectors:
-    - labelSelector:
-        matchLabels:
-          backup: "true"
-      stopPods: true # scale workloads to 0 during backup/restore
-    - namespaces: ["default"]
+    - matchNamespaces:
+        - backup-test-sqlite
+        - default
+    - matchLabels:
+        backup: "true"
+      stopPods: true
+      autoRestore: false
 
-  backupTargets:
-    - name: minio-onsite
+  repositories:
+    - target: s3:http://minio.backup-test:9000/onsite-backups
       priority: 1
-      repository:
-        name: restic-onsite
       backupSchedule: "0 2 * * *" # every night at 02:00
-      retentionSchedule: "0 3 * * *" # prune right after backups
-    - name: minio-offsite
+      env:
+        - name: RESTIC_PASSWORD
+          value: mySuperSecret123
+        - name: AWS_ACCESS_KEY_ID
+          value: minioadmin
+        - name: AWS_SECRET_ACCESS_KEY
+          value: minioadmin
+
+    - target: s3:http://minio.backup-test:9000/offsite-backups
       priority: 2
-      repository:
-        name: restic-offsite
       backupSchedule: "0 2 * * 1" # weekly
-      retentionSchedule: "0 3 * * 1" # monthly
-
-  autoRestore: true # re-hydrate PVCs automatically on a fresh cluster
----
-# apiVersion: backup.datarestor-operator.com/v1alpha1
-# kind: BackupConfig
-# metadata:
-#   name: restic-backups-new-version
-# spec:
-#   selectors:
-#     - labelSelector:
-#         matchLabels:
-#           backup: "true"
-#       stopPods: true # scale workloads to 0 during backup/restore
-#     - namespaces: ["default"]
-
-#   repositories:
-#     - name: restic-onsite
-#       priority: 1
-#       spec:
-#         target: s3:http://minio.backup-test:9000/onsite-backups
-#         backupSchedule: "0 2 * * *" # every night at 02:00
-#         retentionSchedule: "0 3 * * *" # prune right after backups
-#         env:
-#           - name: RESTIC_PASSWORD
-#             value: mySuperSecret123
-#           - name: AWS_ACCESS_KEY_ID
-#             value: minioadmin
-#           - name: AWS_SECRET_ACCESS_KEY
-#             value: minioadmin
-
-#     - name: restic-offsite
-#       priority: 2
-#       backupSchedule: "0 2 * * 1" # weekly
-#       retentionSchedule: "0 3 * * 1" # monthly
-#       spec:
-#         target: s3:http://minio.backup-test:9000/offsite-backups
-#         env:
-#           - name: RESTIC_PASSWORD
-#             value: myCloudSecretKey123
-#           - name: AWS_ACCESS_KEY_ID
-#             value: minioadmin
-#           - name: AWS_SECRET_ACCESS_KEY
-#             value: minioadmin
-
-#   autoRestore: true # re-hydrate PVCs automatically on a fresh cluster
+      env:
+        - name: RESTIC_PASSWORD
+          value: myCloudSecretKey123
+        - name: AWS_ACCESS_KEY_ID
+          value: minioadmin
+        - name: AWS_SECRET_ACCESS_KEY
+          value: minioadmin

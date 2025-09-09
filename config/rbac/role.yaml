@@ -8,7 +8,6 @@ rules:
   - ""
   resources:
   - persistentvolumeclaims
-  - pods
   verbs:
   - get
   - list
@@ -18,14 +17,11 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - pods
   - secrets
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - apps
@@ -43,11 +39,7 @@ rules:
   - backup.datarestor-operator.com
   resources:
   - configs
-  - resticbackups
-  - tasks
   verbs:
-  - create
-  - delete
   - get
   - list
   - patch
@@ -57,7 +49,6 @@ rules:
   - backup.datarestor-operator.com
   resources:
   - configs/finalizers
-  - resticbackups/finalizers
   - tasks/finalizers
   verbs:
   - update
@@ -65,12 +56,23 @@ rules:
   - backup.datarestor-operator.com
   resources:
   - configs/status
-  - resticbackups/status
   - tasks/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - backup.datarestor-operator.com
+  resources:
+  - tasks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - batch
   resources:
