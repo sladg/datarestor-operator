@@ -52,33 +52,33 @@ We can specify just a name of the backup to restore from.
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/restore-from-backup='pre-upgrade-snapshot'
+    backup.datarestor-operator.com/manual-restore='pre-upgrade-snapshot'
 ```
 
 Or we can specify snapshot ID (restic's ID) to restore from.
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/restore-from-backup='1234567890'
+    backup.datarestor-operator.com/manual-restore='1234567890'
 ```
 
 Or we can specify `latest`, `true`, or `now` to restore from the most recent snapshot (default for auto-restore).
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/restore-from-backup='latest'
+    backup.datarestor-operator.com/manual-restore='latest'
 ```
 
 Or we can specify a specify repository (using priority or target) and different host (`{pvcNamespace}-{pvcName}`) to restore from (basically cloning existing PVC into different one).
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/restore-from-backup='1#my-pvc-namespace-my-pvc-name#4dc109'
+    backup.datarestor-operator.com/manual-restore='1#my-pvc-namespace-my-pvc-name#4dc109'
 ```
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/restore-from-backup='s3:http://minio.local:9000/postgres-backups#my-pvc-namespace-my-pvc-name#now'
+    backup.datarestor-operator.com/manual-restore='s3:http://minio:9000/pg#myns-mypvc-name#now'
 ```
 
 ---

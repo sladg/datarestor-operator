@@ -25,7 +25,7 @@ const (
 	AnnBackup = v1.OperatorDomain + "/manual-backup"
 
 	// Used to specify exact backupName/pvcName/repository to restore from
-	AnnRestore = v1.OperatorDomain + "/auto-restore"
+	AnnRestore = v1.OperatorDomain + "/manual-restore"
 
 	// Store replica counts
 	AnnOriginalReplicas = v1.OperatorDomain + "/original-replicas"
