@@ -26,7 +26,6 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	"github.com/robfig/cron/v3"
 	uberzap "go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -223,48 +222,31 @@ func main() {
 
 	// Create common dependencies object
 	deps := &utils.Dependencies{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Config:     mgr.GetConfig(),
-		Logger:     zapLogger.Sugar(),
-		CronParser: cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Config: mgr.GetConfig(),
+		Logger: zapLogger.Sugar(),
 	}
 
-	// Setup BackupConfig controller
-	backupConfigController, err := controller.NewBackupConfigReconciler(deps)
-	if err != nil {
-		setupLog.Error(err, "unable to create BackupConfig controller")
-		os.Exit(1)
-	}
-	if err = backupConfigController.SetupWithManager(mgr); err != nil {
+	configController := controller.NewConfigReconciler(deps)
+	if err = configController.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BackupConfig")
 		os.Exit(1)
 	}
 
-	// Setup ResticRestore controller
-	resticRestoreController := controller.NewResticRestoreReconciler(deps)
-	if err = resticRestoreController.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ResticRestore")
+	configTasksController := controller.NewConfigTasksReconciler(deps)
+	if err = configTasksController.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ConfigTasks")
 		os.Exit(1)
 	}
 
-	// Setup ResticRepository controller
-	resticRepositoryController, err := controller.NewResticRepositoryReconciler(deps)
-	if err != nil {
-		setupLog.Error(err, "unable to create ResticRepository controller")
-		os.Exit(1)
-	}
-	if err = resticRepositoryController.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ResticRepository")
+	// Setup Tasks controller
+	tasksController := controller.NewTasksReconciler(deps)
+	if err = tasksController.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Tasks")
 		os.Exit(1)
 	}
 
-	// Setup ResticBackup controller
-	resticBackupController := controller.NewResticBackupReconciler(deps)
-	if err = resticBackupController.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ResticBackup")
-		os.Exit(1)
-	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {

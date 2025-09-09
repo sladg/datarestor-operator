@@ -4,10 +4,17 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 )
 
-// ShouldPerformBackup checks if a backup should be performed based on the cron schedule
-func ShouldPerformBackup(schedule string, lastBackupTime *time.Time) bool {
+func ShouldPerformBackupFromRepository(repoSpec v1.RepositorySpec) bool {
+	schedule := repoSpec.BackupSchedule
+	lastBackupTime := repoSpec.Status.LastScheduledBackupRun
+
+	if repoSpec.Status.InitializedAt == nil {
+		return false
+	}
+
 	if schedule == "" {
 		return false
 	}
@@ -23,29 +30,8 @@ func ShouldPerformBackup(schedule string, lastBackupTime *time.Time) bool {
 	}
 
 	// Get next scheduled time after last backup
-	nextBackup := cronSchedule.Next(*lastBackupTime)
+	nextBackup := cronSchedule.Next(lastBackupTime.Time)
 
 	// If next scheduled time is in the past, it's time for a backup
 	return time.Now().After(nextBackup)
-}
-
-// GetNextBackupTime returns the next scheduled backup time for debugging purposes
-func GetNextBackupTime(schedule string, lastBackupTime *time.Time) *time.Time {
-	if schedule == "" {
-		return nil
-	}
-
-	cronSchedule, err := cron.ParseStandard(schedule)
-	if err != nil {
-		return nil
-	}
-
-	var nextTime time.Time
-	if lastBackupTime != nil {
-		nextTime = cronSchedule.Next(*lastBackupTime)
-	} else {
-		nextTime = cronSchedule.Next(time.Now())
-	}
-
-	return &nextTime
 }

@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-  - backup_v1alpha1_backupconfig.yaml
+  - backup_v1alpha1_config.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

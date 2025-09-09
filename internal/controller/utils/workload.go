@@ -49,7 +49,7 @@ func SetOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, owne
 		annotations = make(map[string]string)
 	}
 
-	annotations[constants.AnnotationOriginalReplicas] = string(jsonData)
+	annotations[constants.AnnOriginalReplicas] = string(jsonData)
 	owner.SetAnnotations(annotations)
 
 	return deps.Update(ctx, owner)
@@ -57,7 +57,7 @@ func SetOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, owne
 
 func LoadOriginalReplicasFromAnnotation(owner client.Object) (map[string]workloadInfo, error) {
 	annotations := owner.GetAnnotations()
-	jsonData, ok := annotations[constants.AnnotationOriginalReplicas]
+	jsonData, ok := annotations[constants.AnnOriginalReplicas]
 	if !ok || jsonData == "" {
 		return nil, nil // No annotation found, not an error.
 	}
@@ -72,11 +72,11 @@ func LoadOriginalReplicasFromAnnotation(owner client.Object) (map[string]workloa
 // RemoveOriginalReplicasAnnotation removes the original replica count annotation from the owner.
 func RemoveOriginalReplicasAnnotation(ctx context.Context, deps *Dependencies, owner client.Object) error {
 	annotations := owner.GetAnnotations()
-	if _, ok := annotations[constants.AnnotationOriginalReplicas]; !ok {
+	if _, ok := annotations[constants.AnnOriginalReplicas]; !ok {
 		return nil // Annotation doesn't exist, nothing to do.
 	}
 
-	delete(annotations, constants.AnnotationOriginalReplicas)
+	delete(annotations, constants.AnnOriginalReplicas)
 	owner.SetAnnotations(annotations)
 	return deps.Update(ctx, owner)
 }
@@ -291,7 +291,7 @@ func findScalableWorkload(ctx context.Context, c client.Client, owner *metav1.Ow
 }
 
 // @TODO: Use later
-func ShouldStopPods(backupConfig *v1.BackupConfig) bool {
+func ShouldStopPods(backupConfig *v1.Config) bool {
 	selectors := backupConfig.Spec.Selectors
 
 	for _, selector := range selectors {
@@ -313,17 +313,16 @@ type PrepareFinalizeParams struct {
 func LockUnlockForOperation(ctx context.Context, deps *Dependencies, params PrepareFinalizeParams) {
 	log := deps.Logger.Named("[LockForOperation]")
 
-	resources := []corev1.ObjectReference{{Namespace: params.Owner.GetNamespace(), Name: params.Owner.GetName()}}
-	if params.PVC != nil {
-		resources = append(resources, *params.PVC)
-	}
-
-	if err := ApplyBulkFinalizer(ctx, deps, BulkOperationParams{
-		Objects: resources,
-		Map:     map[string]*string{params.Finalizer: nil},
-	}); err != nil {
-		log.Warn("Failed to add finalizer to resources", err)
-	}
+	// Ultra-clean: mix client.Object and ObjectReference directly!
+	// if params.PVC != nil {
+	// 	if err := ApplyBulkFinalizer(ctx, deps, map[string]*string{params.Finalizer: nil}, params.Owner, params.PVC); err != nil {
+	// 		log.Warn("Failed to add finalizer to resources", err)
+	// 	}
+	// } else {
+	// 	if err := ApplyBulkFinalizer(ctx, deps, map[string]*string{params.Finalizer: nil}, params.Owner); err != nil {
+	// 		log.Warn("Failed to add finalizer to resources", err)
+	// 	}
+	// }
 
 	if err := ManageWorkloadScaleForPVC(ctx, deps, *params.PVC, params.Owner, params.ScaleDown); err != nil {
 		log.Warn("Failed to scale down workloads during operation preparation", err)

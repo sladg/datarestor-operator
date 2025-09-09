@@ -1,4 +1,4 @@
-# Build the manager binary
+# Build both the manager and restic binaries
 FROM golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
@@ -16,7 +16,10 @@ COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY internal/ internal/
 
-# Build
+# Build restic binary from our dependency (ensures version consistency)
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o restic-binary github.com/restic/restic/cmd/restic
+
+# Build the manager binary
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
 # was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
@@ -27,6 +30,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
+COPY --from=builder /workspace/restic-binary /usr/local/bin/restic
 COPY --from=builder /workspace/manager .
 USER 65532:65532
 

@@ -16,10 +16,6 @@ limitations under the License.
 
 package v1alpha1
 
-import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
 type Phase string
 
 const (
@@ -46,30 +42,3 @@ const (
 )
 
 const OperatorDomain = "backup.datarestor-operator.com"
-
-// Common status fields for all CRDs
-type CommonStatus struct {
-	// Current phase of the operation
-	// +optional
-	Phase Phase `json:"phase,omitempty"`
-
-	// Error message if operation failed
-	// +optional
-	Error string `json:"error,omitempty"`
-
-	// Time when the operation started
-	// +optional
-	StartTime *metav1.Time `json:"startTime,omitempty"`
-
-	// Time when the operation completed
-	// +optional
-	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-
-	// Time when the backup failed
-	// +optional
-	FailedTime *metav1.Time `json:"failedTime,omitempty"`
-
-	// Conditions represent the latest available observations
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
