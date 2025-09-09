@@ -30,13 +30,20 @@ Here are the most common manual operations you can perform by annotating your re
 #### Triggering a Manual Backup of a Single PVC
 
 ```sh
-kubectl annotate pvc my-pvc backup.datarestor-operator.com/manual-backup='pre-upgrade-snapshot'
+kubectl annotate pvc my-pvc \
+    backup.datarestor-operator.com/manual-backup='pre-upgrade-snapshot'
+```
+
+```sh
+kubectl annotate pvc my-pvc \
+    backup.datarestor-operator.com/manual-backup='pre-upgrade-snapshot'
 ```
 
 #### Triggering a Manual Backup for all PVCs in a Config
 
 ```sh
-kubectl annotate config my-config backup.datarestor-operator.com/manual-backup='my-manual-backup-run'
+kubectl annotate config my-config \
+    backup.datarestor-operator.com/manual-backup='my-manual-backup-run'
 ```
 
 #### Triggering a Restore to a PVC
@@ -44,29 +51,34 @@ kubectl annotate config my-config backup.datarestor-operator.com/manual-backup='
 We can specify just a name of the backup to restore from.
 
 ```sh
-kubectl annotate pvc my-pvc backup.datarestor-operator.com/restore-from-backup='pre-upgrade-snapshot'
+kubectl annotate pvc my-pvc \
+    backup.datarestor-operator.com/restore-from-backup='pre-upgrade-snapshot'
 ```
 
 Or we can specify snapshot ID (restic's ID) to restore from.
 
 ```sh
-kubectl annotate pvc my-pvc backup.datarestor-operator.com/restore-from-backup='1234567890'
+kubectl annotate pvc my-pvc \
+    backup.datarestor-operator.com/restore-from-backup='1234567890'
 ```
 
 Or we can specify `latest`, `true`, or `now` to restore from the most recent snapshot (default for auto-restore).
 
 ```sh
-kubectl annotate pvc my-pvc backup.datarestor-operator.com/restore-from-backup='latest'
+kubectl annotate pvc my-pvc \
+    backup.datarestor-operator.com/restore-from-backup='latest'
 ```
 
 Or we can specify a specify repository (using priority or target) and different host (`{pvcNamespace}-{pvcName}`) to restore from (basically cloning existing PVC into different one).
 
 ```sh
-kubectl annotate pvc my-pvc backup.datarestor-operator.com/restore-from-backup='1#my-pvc-namespace-my-pvc-name#4dc109'
+kubectl annotate pvc my-pvc \
+    backup.datarestor-operator.com/restore-from-backup='1#my-pvc-namespace-my-pvc-name#4dc109'
 ```
 
 ```sh
-kubectl annotate pvc my-pvc backup.datarestor-operator.com/restore-from-backup='s3:http://minio.local:9000/postgres-backups#my-pvc-namespace-my-pvc-name#now'
+kubectl annotate pvc my-pvc \
+    backup.datarestor-operator.com/restore-from-backup='s3:http://minio.local:9000/postgres-backups#my-pvc-namespace-my-pvc-name#now'
 ```
 
 ---
