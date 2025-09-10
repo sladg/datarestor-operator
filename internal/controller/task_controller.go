@@ -50,6 +50,7 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// If not initialized yet, create job
 	if task.Status.InitializedAt.IsZero() {
 		task.Status.InitializedAt = &now
+		task.Status.State = "Pending"
 		controllerutil.AddFinalizer(task, constants.TaskFinalizer)
 
 		// @TODO: Scale down workloads
@@ -87,10 +88,12 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			logger.Errorw("Failed to create job", err, "job", job.Name)
 
 			task.Status.JobStatus = batchv1.JobStatus{Failed: 1}
+			task.Status.State = "Failed"
 			_ = r.Deps.Status().Update(ctx, task)
 			return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, err
 		} else {
 			task.Status.JobStatus = batchv1.JobStatus{Active: 1}
+			task.Status.State = "Running"
 		}
 
 		task.Status.JobRef = corev1.ObjectReference{
@@ -128,13 +131,26 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	task.Status.JobStatus = job.Status
 
-	if job.Status.Active == 0 {
-		// @TODO: Bring workloads back up
-		controllerutil.RemoveFinalizer(task, constants.TaskFinalizer)
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, r.Deps.Update(ctx, task)
+	// Derive high-level state from JobStatus
+	if job.Status.Succeeded > 0 {
+		task.Status.State = "Succeeded"
+	} else if job.Status.Failed > 0 {
+		task.Status.State = "Failed"
+	} else if job.Status.Active > 0 {
+		task.Status.State = "Running"
+	} else {
+		task.Status.State = "Pending"
 	}
 
-	return ctrl.Result{}, r.Deps.Status().Update(ctx, task)
+	err = r.Deps.Status().Update(ctx, task)
+
+	if job.Status.Active == 0 && controllerutil.ContainsFinalizer(task, constants.TaskFinalizer) {
+		// @TODO: Bring workloads back up
+		controllerutil.RemoveFinalizer(task, constants.TaskFinalizer)
+		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, err
+	}
+
+	return ctrl.Result{}, err
 }
 
 func (r *TasksReconciler) SetupWithManager(mgr ctrl.Manager) error {

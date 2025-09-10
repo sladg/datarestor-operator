@@ -65,6 +65,10 @@ type TaskStatus struct {
 	// +optional
 	JobRef corev1.ObjectReference `json:"jobRef,omitempty"`
 
+	// High-level state derived from JobStatus (Pending, Running, Succeeded, Failed)
+	// +optional
+	State string `json:"state,omitempty"`
+
 	// Output from the restic command (if captured)
 	// +optional
 	Output string `json:"output,omitempty"`
@@ -77,9 +81,8 @@ type TaskStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
-// +kubebuilder:printcolumn:name="Annotation",type="string",JSONPath=".spec.repository.name"
-// +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.pvc.name"
-// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.jobStatus.phase"
+// +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.jobTemplate.template.spec.volumes[0].persistentVolumeClaim.claimName"
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.state"
 // +kubebuilder:printcolumn:name="Job",type="string",JSONPath=".status.jobRef.name"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

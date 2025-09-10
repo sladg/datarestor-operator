@@ -18,13 +18,10 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .spec.repository.name
-      name: Annotation
-      type: string
-    - jsonPath: .spec.pvc.name
+    - jsonPath: .spec.jobTemplate.template.spec.volumes[0].persistentVolumeClaim.claimName
       name: PVC
       type: string
-    - jsonPath: .status.jobStatus.phase
+    - jsonPath: .status.state
       name: Status
       type: string
     - jsonPath: .status.jobRef.name
@@ -302,6 +299,10 @@ spec:
                 type: object
               output:
                 description: Output from the restic command (if captured)
+                type: string
+              state:
+                description: High-level state derived from JobStatus (Pending, Running,
+                  Succeeded, Failed)
                 type: string
             type: object
         type: object
