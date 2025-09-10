@@ -348,6 +348,14 @@ spec:
               output:
                 description: Output from the restic command (if captured)
                 type: string
+              scaledDownAt:
+                description: Scaled down at
+                format: date-time
+                type: string
+              scaledUpAt:
+                description: Scaled up at
+                format: date-time
+                type: string
               state:
                 description: High-level state derived from JobStatus (Pending, Running,
                   Succeeded, Failed, ScalingDown, ScalingUp)

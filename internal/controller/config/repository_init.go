@@ -13,15 +13,20 @@ import (
 
 // Initialize repositories in status. This is used to initialize Restic's repositories that are not initialized yet (returns early if already initialized)
 func InitRepositories(ctx context.Context, deps *utils.Dependencies, config *v1.Config) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[InitRepositories]").With("name", config.Name, "namespace", config.Namespace)
+	logger := deps.Logger.Named("[InitRepositories]").With(
+		"name", config.Name,
+		"namespace", config.Namespace,
+	)
 
 	reconcile := false
 
 	for i := range config.Status.Repositories {
 		repository := &config.Status.Repositories[i]
 		if repository.InitializedAt.IsZero() {
+			log := logger.With("repository", repository.Target)
+
 			// If not initialized yet, run restic check + restic init and update the initialized --> rerun
-			logger.Infow("Repository not initialized yet", "repository", repository.Target)
+			log.Info("Repository not initialized yet")
 
 			specRepo := utils.FindRepositorySpec(config.Spec.Repositories, repository)
 
@@ -30,19 +35,19 @@ func InitRepositories(ctx context.Context, deps *utils.Dependencies, config *v1.
 
 			output, err := restic.ExecCheck(ctx, logger, repository.Target, mergedEnv)
 			if err == nil {
-				logger.Infow("Repository checked", "output", output)
+				log.Infow("Repository checked", "output", output)
 				repository.InitializedAt = metav1.Now()
 				continue
 			}
 
 			output, err = restic.ExecInit(ctx, logger, repository.Target, mergedEnv)
 			if err == nil {
-				logger.Infow("Repository initialized", "output", output)
+				log.Infow("Repository initialized", "output", output)
 				repository.InitializedAt = metav1.Now()
 				continue
 			}
 
-			logger.Errorw("Failed to check/initialize repository", err)
+			log.Errorw("Failed to check/initialize repository", err)
 			return true, constants.DefaultRequeueInterval, err
 		}
 	}

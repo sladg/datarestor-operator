@@ -13,7 +13,10 @@ import (
 )
 
 func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvcResult ListPVCsForConfigResult) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[ScheduleBackupRepositories]").With("name", config.Name, "namespace", config.Namespace)
+	logger := deps.Logger.Named("[ScheduleBackupRepositories]").With(
+		"config", config.Name,
+		"configNamespace", config.Namespace,
+	)
 
 	for i, spec := range config.Spec.Repositories {
 		repository := &config.Status.Repositories[i]
@@ -26,6 +29,8 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 		repository.LastScheduledBackupRun = metav1.Now()
 
 		for _, pvc := range pvcResult.MatchedPVCs {
+			log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
+
 			// Build restic args for this repository and pvc
 			params := restic.MakeArgsParams{
 				Repositories: []v1.RepositorySpec{spec},
@@ -48,9 +53,9 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 			})
 
 			if err := deps.Create(ctx, &backupTask); err != nil {
-				logger.Errorw("Failed to create scheduled backup task for PVC", "pvc", pvc.Name, "error", err)
+				log.Errorw("Failed to create scheduled backup task for PVC", "error", err)
 			} else {
-				logger.Infow("Created scheduled backup task for PVC", "pvc", pvc.Name)
+				log.Info("Created scheduled backup task for PVC")
 			}
 		}
 
@@ -58,5 +63,5 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 		return true, constants.LongerRequeueInterval, nil
 	}
 
-	return false, 0, nil
+	return false, -1, nil
 }

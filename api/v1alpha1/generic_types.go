@@ -16,40 +16,4 @@ limitations under the License.
 
 package v1alpha1
 
-type Phase string
-
-const (
-	PhaseUnknown   Phase = ""
-	PhasePending   Phase = "Pending"
-	PhaseRunning   Phase = "Running"
-	PhaseCompleted Phase = "Completed"
-	PhaseFailed    Phase = "Failed"
-	PhaseDeletion  Phase = "Deletion"
-)
-
-type BackupType string
-
-const (
-	BackupTypeScheduled BackupType = "scheduled"
-	BackupTypeManual    BackupType = "manual"
-)
-
-type RestoreType string
-
-const (
-	RestoreTypeManual    RestoreType = "manual"
-	RestoreTypeAutomated RestoreType = "automated"
-)
-
 const OperatorDomain = "backup.datarestor-operator.com"
-
-type TaskState string
-
-const (
-	TaskStatePending     TaskState = "Pending"
-	TaskStateRunning     TaskState = "Running"
-	TaskStateCompleted   TaskState = "Completed"
-	TaskStateFailed      TaskState = "Failed"
-	TaskStateScalingDown TaskState = "ScalingDown"
-	TaskStateScalingUp   TaskState = "ScalingUp"
-)

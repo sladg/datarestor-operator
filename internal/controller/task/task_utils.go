@@ -2,12 +2,13 @@ package task_util
 
 import (
 	"context"
+	"time"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // RemoveTasksByLabels deletes all Task resources matching the given labels.
@@ -58,80 +59,97 @@ func GetTasksStatus(tasks *v1.TaskList) v1.ConfigStatistics {
 	return stats
 }
 
-func CheckTaskScaleDown(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, error) {
-	logger := deps.Logger.Named("task-utils/scale-down").With("task", task.Name, "namespace", task.Namespace)
+func CheckTaskScaleDown(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, time.Duration, error) {
+	logger := deps.Logger.Named("[CheckTaskScaleDown]").With(
+		"task", task.Name,
+		"namespace", task.Namespace,
+		"pvc", task.Spec.PVCRef.Name,
+	)
 
-	shouldScaleDown := task.Spec.StopPods && task.Status.InitializedAt.IsZero()
+	if task.Status.State != v1.TaskStatePending {
+		return false, -1, nil
+	}
 
-	if shouldScaleDown && task.Status.State != v1.TaskStateScalingDown {
+	if task.Spec.StopPods {
+		return false, -1, nil
+	}
+
+	if task.Status.ScaledDownAt.IsZero() {
 		scaling, err := utils.ScaleDownWorkloadsForPVC(ctx, deps, task.Spec.PVCRef, task)
 		if err != nil {
-			logger.Warnw("Failed to scale down workloads", err, "pvc", task.Spec.PVCRef.Name)
-			return true, err
+			logger.Warnw("Failed to scale down workloads, continuing ...", err)
+			return false, -1, err
 		}
 		if !scaling {
-			return false, nil
+			logger.Info("Workloads are not scaled down yet, requeuing ...")
+			return false, -1, nil
 		}
 
-		controllerutil.AddFinalizer(task, constants.TaskFinalizer)
-		task.Status.State = v1.TaskStateScalingDown
-		return true, nil
+		task.Status.ScaledDownAt = metav1.Now()
+		return true, constants.QuickRequeueInterval, nil
 	}
 
-	if task.Status.State == v1.TaskStateScalingDown {
-		done, err := utils.IsScaleDownCompleteForPVC(ctx, deps, task.Spec.PVCRef)
-		if err != nil {
-			logger.Warnw("Failed to check if workloads are scaled down", err, "pvc", task.Spec.PVCRef.Name)
-			return true, err
-		}
-		if !done {
-			logger.Infow("Workloads are not scaled down yet", "pvc", task.Spec.PVCRef.Name)
-			return true, nil
-		}
-
-		task.Status.State = v1.TaskStatePending
-		return true, nil
+	// Check if workloads are scaled down already
+	done, err := utils.IsScaleDownCompleteForPVC(ctx, deps, task.Spec.PVCRef)
+	if err != nil {
+		logger.Warnw("Failed to check if workloads are scaled down, continuing ...", err)
+		return false, -1, err
+	}
+	if !done {
+		logger.Info("Workloads are not scaled down yet, requeuing ...")
+		return true, constants.QuickRequeueInterval, nil
 	}
 
-	return false, nil
+	logger.Info("Workloads are scaled down, starting task ...")
+
+	task.Status.State = v1.TaskStateStarting
+	return true, constants.ImmediateRequeueInterval, nil
 }
 
-func CheckTaskScaleUp(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, error) {
-	logger := deps.Logger.Named("task-utils/scale-up").With("task", task.Name, "namespace", task.Namespace)
+func CheckTaskScaleUp(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, time.Duration, error) {
+	logger := deps.Logger.Named("[CheckTaskScaleUp]").With(
+		"task", task.Name,
+		"namespace", task.Namespace,
+		"pvc", task.Spec.PVCRef.Name,
+	)
 
-	shouldScaleUp := task.Spec.StopPods && utils.Contains([]v1.TaskState{v1.TaskStateFailed, v1.TaskStateCompleted}, task.Status.State)
+	// Only scale up if task is completed or failed
+	if task.Status.State != v1.TaskStateCompleted && task.Status.State != v1.TaskStateFailed {
+		return false, -1, nil
+	}
 
-	// Scale up workloads if job is completed
-	if shouldScaleUp && task.Status.State != v1.TaskStateScalingUp {
+	if task.Spec.StopPods {
+		return false, -1, nil
+	}
+
+	// Initialize the scaling up of workloads
+	if task.Status.ScaledUpAt.IsZero() {
 		scaling, err := utils.ScaleUpWorkloadsForPVC(ctx, deps, task.Spec.PVCRef, task)
 		if err != nil {
-			logger.Warnw("Failed to scale up workloads", err, "pvc", task.Spec.PVCRef.Name)
-			return true, err
+			logger.Warnw("Failed to scale up workloads, continuing ...", err)
+			return false, -1, err
 		}
 		if !scaling {
-			return false, nil
+			logger.Info("Workloads are not scaled up yet, requeuing ...")
+			return false, -1, nil
 		}
 
-		task.Status.State = v1.TaskStateScalingUp
-
-		return true, nil
+		task.Status.ScaledUpAt = metav1.Now()
+		return true, constants.ImmediateRequeueInterval, nil
 	}
 
-	// Remove finalizer if job is completed and workloads are scaled up
-	if task.Status.State == v1.TaskStateScalingUp {
-		done, err := utils.IsScaleUpCompleteForPVC(ctx, deps, task.Spec.PVCRef, task)
-		if err != nil {
-			logger.Warnw("Failed to check if workloads are scaled down", err, "pvc", task.Spec.PVCRef.Name)
-			return true, err
-		}
-		if !done {
-			logger.Infow("Workloads are not scaled down yet", "pvc", task.Spec.PVCRef.Name)
-			return true, nil
-		}
-
-		controllerutil.RemoveFinalizer(task, constants.TaskFinalizer)
-		return true, nil
+	// Check if workloads are scaled up already
+	done, err := utils.IsScaleUpCompleteForPVC(ctx, deps, task.Spec.PVCRef, task)
+	if err != nil {
+		logger.Warnw("Failed to check if workloads are scaled up, continuing ...", err)
+		return false, -1, err
+	}
+	if !done {
+		logger.Info("Workloads are not scaled up yet, requeuing ...")
+		return true, constants.QuickRequeueInterval, nil
 	}
 
-	return false, nil
+	logger.Info("Workloads are scaled up, task completed ...")
+
+	return true, constants.ImmediateRequeueInterval, nil
 }

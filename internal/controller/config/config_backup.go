@@ -12,15 +12,20 @@ import (
 )
 
 func ConfigBackup(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvcResult ListPVCsForConfigResult) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[ConfigBackup]").With("name", config.Name, "namespace", config.Namespace)
+	logger := deps.Logger.Named("[ConfigBackup]").With(
+		"config", config.Name,
+		"configNamespace", config.Namespace,
+	)
 
 	if config.Annotations[constants.AnnBackup] == "" {
-		return false, 0, nil
+		return false, -1, nil
 	}
 
-	logger.Infow("Force backup annotation detected, removing ...")
+	logger.Info("Force backup annotation detected, removing ...")
 
 	for _, pvc := range pvcResult.MatchedPVCs {
+		log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
+
 		// Prepare backup args
 		params := restic.MakeArgsParams{
 			Repositories: config.Spec.Repositories,
@@ -45,9 +50,9 @@ func ConfigBackup(ctx context.Context, deps *utils.Dependencies, config *v1.Conf
 
 		// Create it
 		if err := deps.Create(ctx, &backupTask); err != nil {
-			logger.Errorw("Failed to create backup task for PVC", "pvc", pvc.Name, "error", err)
+			log.Errorw("Failed to create backup task for PVC", "error", err)
 		} else {
-			logger.Infow("Created backup task for PVC", "pvc", pvc.Name)
+			log.Info("Created backup task")
 		}
 	}
 

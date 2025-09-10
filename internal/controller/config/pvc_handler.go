@@ -13,13 +13,18 @@ import (
 )
 
 func PVCBackup(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvc *corev1.PersistentVolumeClaim) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[PVCBackup]").With("name", config.Name, "namespace", config.Namespace)
+	logger := deps.Logger.Named("[PVCBackup]").With(
+		"config", config.Name,
+		"configNamespace", config.Namespace,
+		"pvc", pvc.Name,
+		"pvcNamespace", pvc.Namespace,
+	)
 
 	if pvc.Annotations[constants.AnnBackup] == "" {
-		return false, 0, nil
+		return false, -1, nil
 	}
 
-	logger.Infow("Backup annotation detected on PVC", "pvc", pvc.Name)
+	logger.Info("Backup annotation detected")
 
 	params := restic.MakeArgsParams{
 		Repositories: config.Spec.Repositories,
@@ -41,9 +46,9 @@ func PVCBackup(ctx context.Context, deps *utils.Dependencies, config *v1.Config,
 	})
 
 	if err := deps.Create(ctx, &backupTask); err != nil {
-		logger.Errorw("Failed to create backup task for PVC", "pvc", pvc.Name, "error", err)
+		logger.Errorw("Failed to create backup task for PVC", "error", err)
 	} else {
-		logger.Infow("Created backup task for PVC", "pvc", pvc.Name)
+		logger.Info("Created backup task")
 	}
 
 	// Remove annotation to avoid loops
@@ -51,22 +56,27 @@ func PVCBackup(ctx context.Context, deps *utils.Dependencies, config *v1.Config,
 	pvc.SetAnnotations(annotations)
 
 	if err := deps.Update(ctx, pvc); err != nil {
-		logger.Errorw("Failed to clear backup annotation on PVC", "pvc", pvc.Name, "error", err)
+		logger.Errorw("Failed to clear backup annotation on PVC", "error", err)
 	} else {
-		logger.Infow("Cleared backup annotation on PVC", "pvc", pvc.Name)
+		logger.Info("Cleared backup annotation")
 	}
 
 	return true, constants.LongerRequeueInterval, nil
 }
 
 func PVCRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvc *corev1.PersistentVolumeClaim) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[PVCRestore]").With("name", config.Name, "namespace", config.Namespace)
+	logger := deps.Logger.Named("[PVCRestore]").With(
+		"config", config.Name,
+		"configNamespace", config.Namespace,
+		"pvc", pvc.Name,
+		"pvcNamespace", pvc.Namespace,
+	)
 
 	if pvc.Annotations[constants.AnnRestore] == "" {
-		return false, 0, nil
+		return false, -1, nil
 	}
 
-	logger.Infow("Restore annotation detected on PVC", "pvc", pvc.Name)
+	logger.Info("Restore annotation detected")
 
 	params := restic.MakeArgsParams{
 		Repositories: config.Spec.Repositories,
@@ -88,17 +98,17 @@ func PVCRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Config
 	})
 
 	if err := deps.Create(ctx, &restoreTask); err != nil {
-		logger.Errorw("Failed to create restore task for PVC", "pvc", pvc.Name, "error", err)
+		logger.Errorw("Failed to create restore task for PVC", "error", err)
 	} else {
-		logger.Infow("Created restore task for PVC", "pvc", pvc.Name)
+		logger.Info("Created restore task")
 	}
 
 	annotations := utils.MakeAnnotation(pvc.Annotations, map[string]string{constants.AnnRestore: ""})
 	pvc.SetAnnotations(annotations)
 	if err := deps.Update(ctx, pvc); err != nil {
-		logger.Errorw("Failed to clear restore annotation on PVC", "pvc", pvc.Name, "error", err)
+		logger.Errorw("Failed to clear restore annotation on PVC", "error", err)
 	} else {
-		logger.Infow("Cleared restore annotation on PVC", "pvc", pvc.Name)
+		logger.Info("Cleared restore annotation")
 	}
 
 	return true, constants.LongerRequeueInterval, nil

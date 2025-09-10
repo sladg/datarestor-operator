@@ -39,10 +39,12 @@ func SyncRepositories(ctx context.Context, deps *utils.Dependencies, config *v1.
 	// Rebuild status slice to mirror spec order
 	newStatus := make([]v1.RepositoryStatus, 0, len(config.Spec.Repositories))
 	for _, repoSpec := range config.Spec.Repositories {
+		log := logger.With("repository", repoSpec.Target)
+
 		if existing, ok := statusByTarget[repoSpec.Target]; ok {
 			newStatus = append(newStatus, existing)
 		} else {
-			logger.Infow("Repository added in spec - adding to status", "repository", repoSpec.Target)
+			log.Info("Repository added in spec - adding to status")
 			changed = true
 			newStatus = append(newStatus, v1.RepositoryStatus{
 				Target:                 repoSpec.Target,
@@ -68,14 +70,10 @@ func SyncRepositories(ctx context.Context, deps *utils.Dependencies, config *v1.
 	}
 
 	if !changed {
-		return false, 0, nil
+		return false, -1, nil
 	}
 
 	config.Status.Repositories = newStatus
-	if err := deps.Status().Update(ctx, config); err != nil {
-		logger.Errorw("Failed to update Config status during repository sync", "error", err)
-		return true, constants.ImmediateRequeueInterval, err
-	}
 
 	return true, constants.ImmediateRequeueInterval, nil
 }

@@ -2,21 +2,15 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 
 	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
 	"github.com/sladg/datarestor-operator/internal/constants"
+	reconcile_util "github.com/sladg/datarestor-operator/internal/controller/reconiler"
 	task_util "github.com/sladg/datarestor-operator/internal/controller/task"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -37,134 +31,64 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	logger := r.Deps.Logger.Named("[Tasks]").With("name", req.Name, "namespace", req.Namespace)
 	logger.Info("Tasks reconciliation")
 
+	// Fetch the Task instance
 	task := &v1.Task{}
-	isNotFound, isError := utils.IsObjectNotFound(ctx, r.Deps, req, task)
-	if isNotFound {
-		return ctrl.Result{}, nil
-	} else if isError {
-		return ctrl.Result{}, fmt.Errorf("failed to get Task")
+	reconcile, period, err := reconcile_util.CheckResource(ctx, r.Deps, req, task)
+	if reconcile {
+		return ctrl.Result{RequeueAfter: period}, err
+	}
+
+	doObject := func() error { return r.Deps.Update(ctx, task) }
+	doStatus := func() error { return r.Deps.Status().Update(ctx, task) }
+	isActive := func() bool {
+		return task.Status.State == v1.TaskStateRunning || task.Status.State == v1.TaskStatePending
+	}
+
+	// Delete task if it is being deleted
+	reconcile, period, err = reconcile_util.DeleteResourceWithConditionalFn(ctx, r.Deps, task, constants.TaskFinalizer, isActive)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
+		return res, err
+	}
+
+	// ------------ Add finalizer ------------
+	reconcile, period, err = reconcile_util.InitResource(ctx, r.Deps, task, constants.TaskFinalizer)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
+		return res, err
+	}
+
+	// ------------ Init task ------------
+	reconcile, period, err = task_util.Init(ctx, r.Deps, task)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+		return res, err
 	}
 
 	// ------------ Scale down ------------
-	reconcile, err := task_util.CheckTaskScaleDown(ctx, r.Deps, task)
-	if err != nil {
-		logger.Warnw("Failed to check if workloads are scaled down", err, "pvc", task.Spec.PVCRef.Name)
-		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, err
-	}
-	if reconcile {
-		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, r.Deps.Update(ctx, task)
+	reconcile, period, err = task_util.CheckTaskScaleDown(ctx, r.Deps, task)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+		return res, err
 	}
 
-	// If not initialized yet, create job
-	if task.Status.InitializedAt.IsZero() {
-		task.Status.InitializedAt = metav1.Now()
-		task.Status.State = v1.TaskStatePending
-		controllerutil.AddFinalizer(task, constants.TaskFinalizer)
-
-		job := batchv1.Job{
-			TypeMeta: metav1.TypeMeta{
-				APIVersion: "batch/v1",
-				Kind:       "Job",
-			},
-			Spec: batchv1.JobSpec{},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      task.Name + "-job",
-				Namespace: task.Namespace,
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: task.APIVersion,
-						Kind:       task.Kind,
-						Name:       task.Name,
-						UID:        task.UID,
-						Controller: ptr.To(true),
-					},
-				},
-			},
-		}
-
-		if err := json.Unmarshal(task.Spec.JobTemplate.Raw, &job.Spec); err != nil {
-			logger.Errorw("Failed to unmarshal jobTemplate", err)
-			return ctrl.Result{}, err
-		}
-
-		// Debug: Log the job spec to see what's missing
-		logger.Infow("Creating job", "jobName", job.Name, "jobSpec", job.Spec)
-
-		if err := r.Deps.Create(ctx, &job); err != nil {
-			logger.Errorw("Failed to create job", err, "job", job.Name)
-
-			task.Status.JobStatus = batchv1.JobStatus{Failed: 1}
-			task.Status.State = "Failed"
-			_ = r.Deps.Status().Update(ctx, task)
-			return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, err
-		} else {
-			task.Status.JobStatus = batchv1.JobStatus{Active: 1}
-			task.Status.State = v1.TaskStateRunning
-		}
-
-		task.Status.JobRef = corev1.ObjectReference{
-			APIVersion: "batch/v1",
-			Kind:       "Job",
-			Name:       job.Name,
-			Namespace:  job.Namespace,
-			UID:        job.UID,
-		}
-
-		return ctrl.Result{}, r.Deps.Update(ctx, task) // Will be requeued by the job changes
+	// ------------ Start task ------------
+	reconcile, period, err = task_util.Start(ctx, r.Deps, task)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+		return res, err
 	}
 
-	if task.DeletionTimestamp != nil {
-		if task.Status.JobStatus.Active > 0 {
-			logger.Info("Task is being deleted, but job is still running, requeuing")
-			return ctrl.Result{}, nil // Will be requeued by the job changes
-		}
-
-		controllerutil.RemoveFinalizer(task, constants.TaskFinalizer)
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, r.Deps.Update(ctx, task)
-	}
-
-	job, err := task_util.GetJob(ctx, r.Deps, task)
-	if errors.IsNotFound(err) {
-		logger.Info("Job not found, removing finalizer - assuming obsolete task, nuking itself")
-		controllerutil.RemoveFinalizer(task, constants.TaskFinalizer)
-		_ = r.Deps.Update(ctx, task)
-		_ = r.Deps.Delete(ctx, task)
-		return ctrl.Result{}, nil
-	} else if err != nil {
-		logger.Errorw("Failed to get job", err, "job", task.Status.JobRef.Name)
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, err
-	}
-
-	task.Status.JobStatus = job.Status
-
-	// Derive high-level state from JobStatus
-	if job.Status.Succeeded > 0 {
-		task.Status.State = v1.TaskStateCompleted
-	} else if job.Status.Failed > 0 {
-		task.Status.State = v1.TaskStateFailed
-	} else if job.Status.Active > 0 {
-		task.Status.State = v1.TaskStateRunning
-	} else {
-		task.Status.State = v1.TaskStatePending
+	// ------------ Update task status ------------
+	reconcile, period, err = task_util.UpdateTaskStatus(ctx, r.Deps, task)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+		return res, err
 	}
 
 	// ------------ Scale up ------------
-	reconcile, err = task_util.CheckTaskScaleUp(ctx, r.Deps, task)
-	if err != nil {
-		logger.Warnw("Failed to check if workloads are scaled up", err, "pvc", task.Spec.PVCRef.Name)
-		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, err
-	}
-	if reconcile {
-		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, r.Deps.Update(ctx, task)
+	reconcile, period, err = task_util.CheckTaskScaleUp(ctx, r.Deps, task)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+		return res, err
 	}
 
-	// Ensure finalizer is removed if job is done and scale up is complete
-	if controllerutil.ContainsFinalizer(task, constants.TaskFinalizer) {
-		controllerutil.RemoveFinalizer(task, constants.TaskFinalizer)
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, r.Deps.Update(ctx, task)
-	}
+	logger.Info("Tasks reconciliation completed")
 
-	return ctrl.Result{}, r.Deps.Status().Update(ctx, task)
+	return ctrl.Result{}, nil
 }
 
 func (r *TasksReconciler) SetupWithManager(mgr ctrl.Manager) error {

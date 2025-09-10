@@ -19,6 +19,9 @@ func Step(err error, reconcile bool, period time.Duration, onReconcile func() er
 				return true, ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, uerr
 			}
 		}
+		if period == -1 {
+			return true, ctrl.Result{}, nil
+		}
 		return true, ctrl.Result{RequeueAfter: period}, nil
 	}
 	return false, ctrl.Result{}, nil

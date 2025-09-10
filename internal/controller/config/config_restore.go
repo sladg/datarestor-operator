@@ -12,15 +12,20 @@ import (
 )
 
 func ConfigRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvcResult ListPVCsForConfigResult) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[ConfigRestore]").With("name", config.Name, "namespace", config.Namespace)
+	logger := deps.Logger.Named("[ConfigRestore]").With(
+		"config", config.Name,
+		"configNamespace", config.Namespace,
+	)
 
 	if config.Annotations[constants.AnnRestore] == "" {
-		return false, 0, nil
+		return false, -1, nil
 	}
 
-	logger.Infow("Force restore annotation detected, removing ...")
+	logger.Info("Force restore annotation detected, removing ...")
 
 	for _, pvc := range pvcResult.MatchedPVCs {
+		log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
+
 		// Prepare restore args
 		params := restic.MakeArgsParams{
 			Repositories: config.Spec.Repositories,
@@ -45,9 +50,9 @@ func ConfigRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Con
 
 		// Create it
 		if err := deps.Create(ctx, &restoreTask); err != nil {
-			logger.Errorw("Failed to create restore task for PVC", "pvc", pvc.Name, "error", err)
+			log.Errorw("Failed to create restore task for PVC", "error", err)
 		} else {
-			logger.Infow("Created restore task for PVC", "pvc", pvc.Name)
+			log.Info("Created restore task")
 		}
 	}
 

@@ -49,8 +49,6 @@ const (
 	MaxAgeForNewPVC          = 15 * time.Minute
 )
 
-var ActivePhases = []v1.Phase{v1.PhaseRunning, v1.PhasePending}
-
 // GetResticImage returns the full restic image string with version from dependency
 func GetResticImage() string {
 	info, ok := debug.ReadBuildInfo()

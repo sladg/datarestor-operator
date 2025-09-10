@@ -4,7 +4,6 @@ import (
 	"context"
 
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
@@ -62,23 +61,21 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{RequeueAfter: period}, err
 	}
 
-	doStatus := func() error { return r.Deps.Status().Update(ctx, config) }
-	doObject := func() error { return r.Deps.Update(ctx, config) }
 	noUpdate := func() error { return nil }
+	doObject := func() error { return r.Deps.Update(ctx, config) }
+	doStatus := func() error { return r.Deps.Status().Update(ctx, config) }
+	onDelete := func() error { return task_util.RemoveTasksByConfig(ctx, r.Deps, config) }
 
 	// --------- Delete resource ---------
 	// If deleting, allow it. Remove any tasks references and remove finalizer
-	reconcile, period, err = reconcile_util.DeleteResourceWithFinalizer(ctx, r.Deps, config, constants.ConfigFinalizer, func(ctx context.Context, obj client.Object) error {
-		return task_util.RemoveTasksByConfig(ctx, r.Deps, config)
-	})
-	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+	reconcile, period, err = reconcile_util.DeleteResourceWithFinalizer(ctx, r.Deps, config, constants.ConfigFinalizer, onDelete)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 		return res, err
 	}
 
-	// --------- Initialize resource ---------
-	// Check if config is initialized, if not, add finalizer and initialize repositories
+	// --------- Add finalizer ---------
 	reconcile, period, err = reconcile_util.InitResource(ctx, r.Deps, config, constants.ConfigFinalizer)
-	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 		return res, err
 	}
 
@@ -142,6 +139,8 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// @TODO: Allow for repositories to be annotated for restore/backup
+
+	logger.Info("Config reconciliation completed, requeueing")
 
 	// We need to requeue to allow for scheduled backups to be processed
 	return ctrl.Result{RequeueAfter: constants.DefaultRequeueInterval}, nil

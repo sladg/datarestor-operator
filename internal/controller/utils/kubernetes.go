@@ -19,18 +19,17 @@ func Contains[T comparable](slice []T, element T) bool {
 }
 
 func IsObjectNotFound(ctx context.Context, deps *Dependencies, req ctrl.Request, obj client.Object) (bool, bool) {
-	log := deps.Logger.Named("[IsObjectNotFound]")
+	log := deps.Logger.Named("[IsObjectNotFound]").With("name", req.Name, "namespace", req.Namespace)
 
 	err := deps.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: req.Namespace}, obj)
+
 	isNotFound := client.IgnoreNotFound(err) != nil
-	if err != nil {
-		log.Warn("Failed to get object", "name", req.Name, "namespace", req.Namespace)
-
-		return false, true
-	} else if isNotFound {
-		log.Info("Object not found - must be deleted, ignoring", "name", req.Name, "namespace", req.Namespace)
-
+	if isNotFound {
+		log.Infow("Object not found - must be deleted, ignoring")
 		return true, false
+	} else if err != nil {
+		log.Warnw("Failed to get object")
+		return false, true
 	}
 
 	return false, false

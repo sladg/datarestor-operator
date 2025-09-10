@@ -23,7 +23,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// JobType defines the type of restic operation
+type TaskState string
+
+const (
+	TaskStatePending   TaskState = "Pending"  // Reconciler picking up, finazlier being added
+	TaskStateStarting  TaskState = "Starting" // Starting the underlying job
+	TaskStateRunning   TaskState = "Running"  // Job is running, observing it's status
+	TaskStateCompleted TaskState = "Completed"
+	TaskStateFailed    TaskState = "Failed"
+)
+
 type TaskType string
 
 const (
@@ -81,6 +90,14 @@ type TaskStatus struct {
 	// Initialized at
 	// +optional
 	InitializedAt metav1.Time `json:"initializedAt,omitempty"`
+
+	// Scaled down at
+	// +optional
+	ScaledDownAt metav1.Time `json:"scaledDownAt,omitempty"`
+
+	// Scaled up at
+	// +optional
+	ScaledUpAt metav1.Time `json:"scaledUpAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

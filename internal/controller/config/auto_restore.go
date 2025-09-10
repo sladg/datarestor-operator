@@ -15,18 +15,22 @@ import (
 //
 // TODO: Allow for repository-level auto-restore override
 func AutoRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvcResult ListPVCsForConfigResult) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[AutoRestore]").With("name", config.Name, "namespace", config.Namespace)
+	logger := deps.Logger.Named("[AutoRestore]").With(
+		"name", config.Name,
+		"namespace", config.Namespace,
+	)
 
 	if len(pvcResult.UnclaimedPVCs) == 0 {
-		return false, 0, nil
+		return false, -1, nil
 	}
 
 	if !config.Spec.AutoRestore {
-		return false, 0, nil
+		return false, -1, nil
 	}
 
 	for _, pvc := range pvcResult.UnclaimedPVCs {
-		logger.Infow("New unclaimed PVC detected", "pvc", pvc.Name)
+		log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
+		log.Info("New unclaimed PVC detected")
 
 		params := restic.MakeArgsParams{
 			Repositories: config.Spec.Repositories,
@@ -50,22 +54,22 @@ func AutoRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Confi
 		})
 
 		if err := deps.Create(ctx, &restoreTask); err != nil {
-			logger.Errorw("Failed to create restore task for new PVC", "pvc", pvc.Name, "error", err)
+			log.Errorw("Failed to create restore task for new PVC", "error", err)
 			return true, constants.QuickRequeueInterval, nil
 		}
 
-		logger.Infow("Created restore task for new PVC", "pvc", pvc.Name)
+		log.Info("Created restore task for new PVC")
 
 		// Mark PVC for auto-restore
 		annotations := utils.MakeAnnotation(pvc.Annotations, map[string]string{constants.AnnAutoRestored: "true"})
 		pvc.SetAnnotations(annotations)
 
 		if err := deps.Update(ctx, pvc); err != nil {
-			logger.Errorw("Failed to mark PVC as auto-restored", "pvc", pvc.Name, "error", err)
+			log.Errorw("Failed to mark PVC as auto-restored", "error", err)
 			return true, constants.QuickRequeueInterval, err
 		}
 
-		logger.Infow("Marked PVC as auto-restored", "pvc", pvc.Name)
+		log.Info("Marked PVC as auto-restored")
 	}
 
 	return true, constants.DefaultRequeueInterval, nil

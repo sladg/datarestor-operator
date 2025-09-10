@@ -8,6 +8,7 @@ import (
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -33,10 +34,13 @@ func GetJobName(task *v1.Task) string {
 	return fmt.Sprintf("%s-job", task.Name)
 }
 
-func GetJob(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (*batchv1.Job, error) {
+func GetJob(ctx context.Context, deps *utils.Dependencies, task *v1.Task, ignoreNotFound bool) (*batchv1.Job, error) {
 	job := &batchv1.Job{}
 	err := deps.Get(ctx, client.ObjectKey{Namespace: task.Status.JobRef.Namespace, Name: task.Status.JobRef.Name}, job)
 	if err != nil {
+		if ignoreNotFound && errors.IsNotFound(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return job, nil

@@ -13,8 +13,18 @@ import (
 )
 
 func InitResource(ctx context.Context, deps *utils.Dependencies, resource client.Object, finalizer string) (bool, time.Duration, error) {
+	logger := deps.Logger.Named("[InitResource]").With("resource", resource.GetName(), "namespace", resource.GetNamespace())
 
-	// Set finalizer
+	if controllerutil.ContainsFinalizer(resource, finalizer) {
+		return false, -1, nil
+	}
+
+	if resource.GetDeletionTimestamp() != nil {
+		return false, -1, nil
+	}
+
+	logger.Info("Adding finalizer", "finalizer", finalizer)
+
 	controllerutil.AddFinalizer(resource, finalizer)
 
 	return true, constants.ImmediateRequeueInterval, nil
