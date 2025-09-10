@@ -42,3 +42,14 @@ const (
 )
 
 const OperatorDomain = "backup.datarestor-operator.com"
+
+type TaskState string
+
+const (
+	TaskStatePending     TaskState = "Pending"
+	TaskStateRunning     TaskState = "Running"
+	TaskStateCompleted   TaskState = "Completed"
+	TaskStateFailed      TaskState = "Failed"
+	TaskStateScalingDown TaskState = "ScalingDown"
+	TaskStateScalingUp   TaskState = "ScalingUp"
+)

@@ -45,15 +45,21 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, fmt.Errorf("failed to get Task")
 	}
 
-	now := metav1.Now()
+	// ------------ Scale down ------------
+	reconcile, err := task_util.CheckTaskScaleDown(ctx, r.Deps, task)
+	if err != nil {
+		logger.Warnw("Failed to check if workloads are scaled down", err, "pvc", task.Spec.PVCRef.Name)
+		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, err
+	}
+	if reconcile {
+		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, r.Deps.Update(ctx, task)
+	}
 
 	// If not initialized yet, create job
 	if task.Status.InitializedAt.IsZero() {
-		task.Status.InitializedAt = &now
-		task.Status.State = "Pending"
+		task.Status.InitializedAt = metav1.Now()
+		task.Status.State = v1.TaskStatePending
 		controllerutil.AddFinalizer(task, constants.TaskFinalizer)
-
-		// @TODO: Scale down workloads
 
 		job := batchv1.Job{
 			TypeMeta: metav1.TypeMeta{
@@ -93,7 +99,7 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, err
 		} else {
 			task.Status.JobStatus = batchv1.JobStatus{Active: 1}
-			task.Status.State = "Running"
+			task.Status.State = v1.TaskStateRunning
 		}
 
 		task.Status.JobRef = corev1.ObjectReference{
@@ -104,7 +110,7 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			UID:        job.UID,
 		}
 
-		return ctrl.Result{}, r.Deps.Status().Update(ctx, task) // Will be requeued by the job changes
+		return ctrl.Result{}, r.Deps.Update(ctx, task) // Will be requeued by the job changes
 	}
 
 	if task.DeletionTimestamp != nil {
@@ -133,24 +139,32 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Derive high-level state from JobStatus
 	if job.Status.Succeeded > 0 {
-		task.Status.State = "Succeeded"
+		task.Status.State = v1.TaskStateCompleted
 	} else if job.Status.Failed > 0 {
-		task.Status.State = "Failed"
+		task.Status.State = v1.TaskStateFailed
 	} else if job.Status.Active > 0 {
-		task.Status.State = "Running"
+		task.Status.State = v1.TaskStateRunning
 	} else {
-		task.Status.State = "Pending"
+		task.Status.State = v1.TaskStatePending
 	}
 
-	err = r.Deps.Status().Update(ctx, task)
+	// ------------ Scale up ------------
+	reconcile, err = task_util.CheckTaskScaleUp(ctx, r.Deps, task)
+	if err != nil {
+		logger.Warnw("Failed to check if workloads are scaled up", err, "pvc", task.Spec.PVCRef.Name)
+		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, err
+	}
+	if reconcile {
+		return ctrl.Result{RequeueAfter: constants.QuickRequeueInterval}, r.Deps.Update(ctx, task)
+	}
 
-	if job.Status.Active == 0 && controllerutil.ContainsFinalizer(task, constants.TaskFinalizer) {
-		// @TODO: Bring workloads back up
+	// Ensure finalizer is removed if job is done and scale up is complete
+	if controllerutil.ContainsFinalizer(task, constants.TaskFinalizer) {
 		controllerutil.RemoveFinalizer(task, constants.TaskFinalizer)
-		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, err
+		return ctrl.Result{RequeueAfter: constants.ImmediateRequeueInterval}, r.Deps.Update(ctx, task)
 	}
 
-	return ctrl.Result{}, err
+	return ctrl.Result{}, r.Deps.Status().Update(ctx, task)
 }
 
 func (r *TasksReconciler) SetupWithManager(mgr ctrl.Manager) error {

@@ -39,20 +39,25 @@ type TaskSpec struct {
 	// +required
 	Name string `json:"name"`
 
-	// Annotation of the task, {repoName}#{hostName}#{backupName} or {hostName}#{backupName} or {backupName}
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9-]+#([a-zA-Z0-9-]+#)?[a-zA-Z0-9-]+$`
-	Annotation string `json:"annotation,omitempty"`
-
 	// Type of restic operation
 	// +required
 	// +kubebuilder:validation:Enum=backup-scheduled;backup-manual;restore-manual;restore-automated
 	Type TaskType `json:"type"`
+
+	// StopPods specifies whether to scale down workloads using the PVCs matched by this selector.
+	// +optional
+	// +kubebuilder:default=false
+	StopPods bool `json:"stopPods,omitempty"`
 
 	// Job template - if not specified, job will fail
 	// +optional
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Type=object
 	JobTemplate apiextensionsv1.JSON `json:"jobTemplate,omitempty"`
+
+	// Reference to the PersistentVolumeClaim to back up or restore
+	// +required
+	PVCRef corev1.ObjectReference `json:"pvcRef,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task
@@ -65,9 +70,9 @@ type TaskStatus struct {
 	// +optional
 	JobRef corev1.ObjectReference `json:"jobRef,omitempty"`
 
-	// High-level state derived from JobStatus (Pending, Running, Succeeded, Failed)
+	// High-level state derived from JobStatus (Pending, Running, Succeeded, Failed, ScalingDown, ScalingUp)
 	// +optional
-	State string `json:"state,omitempty"`
+	State TaskState `json:"state,omitempty"`
 
 	// Output from the restic command (if captured)
 	// +optional
@@ -75,13 +80,14 @@ type TaskStatus struct {
 
 	// Initialized at
 	// +optional
-	InitializedAt *metav1.Time `json:"initializedAt,omitempty"`
+	InitializedAt metav1.Time `json:"initializedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Type",type="string",JSONPath=".spec.type"
-// +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.jobTemplate.template.spec.volumes[0].persistentVolumeClaim.claimName"
+// +kubebuilder:printcolumn:name="Stop Pods",type="boolean",JSONPath=".spec.stopPods"
+// +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.pvcRef.name"
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.state"
 // +kubebuilder:printcolumn:name="Job",type="string",JSONPath=".status.jobRef.name"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"

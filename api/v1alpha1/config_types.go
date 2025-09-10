@@ -32,11 +32,13 @@ type Selector struct {
 	MatchNamespaces []string `json:"matchNamespaces,omitempty"`
 
 	// StopPods specifies whether to scale down workloads using the PVCs matched by this selector.
+	// @TODO: Use this parameter. Currently ignored, only Config-level is used.
 	// +optional
 	// +kubebuilder:default=false
 	StopPods bool `json:"stopPods,omitempty"`
 
 	// AutoRestore specifies whether to enable automatic restore for new PVCs
+	// @TODO: Use this parameter. Currently ignored, only Config-level is used.
 	// +optional
 	// +kubebuilder:default=true
 	AutoRestore bool `json:"autoRestore,omitempty"`
@@ -89,19 +91,19 @@ type RepositorySpec struct {
 type RepositoryStatus struct {
 	// Restic repository target (e.g., s3:s3.amazonaws.com/bucket/path)
 	// +optional
-	Target string `json:"target"` // @TODO: Remove, it's on Spec
+	Target string `json:"target"`
 
 	// Time when the repository was initialized
 	// +optional
-	InitializedAt *metav1.Time `json:"initializedAt,omitempty"`
+	InitializedAt metav1.Time `json:"initializedAt"`
 
 	// Known backups
 	// +optional
-	Backups []string `json:"backups,omitempty"`
+	Backups []string `json:"backups"`
 
 	// Information about the last scheduled backup run for this target
 	// +optional
-	LastScheduledBackupRun *metav1.Time `json:"lastScheduledBackupRun,omitempty"`
+	LastScheduledBackupRun metav1.Time `json:"lastScheduledBackupRun"`
 }
 
 type WorkloadInfo struct {
@@ -122,25 +124,25 @@ type WorkloadInfo struct {
 type ConfigStatus struct {
 	// Number of PVCs currently selected by this config
 	// +optional
-	MatchedPVCsCount int32 `json:"matchedPVCsCount,omitempty"`
+	MatchedPVCsCount int32 `json:"matchedPVCsCount"`
 
 	// Statistics about the repository
 	// +optional
-	Statistics ConfigStatistics `json:"statistics,omitempty"`
+	Statistics ConfigStatistics `json:"statistics"`
 
 	// @TODO: Add LastMaintenanceRun
 
 	// Workload information
 	// +optional
-	WorkloadInfo map[string]WorkloadInfo `json:"workloadInfo,omitempty"`
+	WorkloadInfo map[string]WorkloadInfo `json:"workloadInfo"`
 
 	// Repositories status
 	// +optional
-	Repositories []RepositorySpec `json:"repositories,omitempty"`
+	Repositories []RepositoryStatus `json:"repositories"`
 
 	// Initialized at
 	// +optional
-	InitializedAt *metav1.Time `json:"initializedAt,omitempty"`
+	InitializedAt metav1.Time `json:"initializedAt"`
 }
 
 type ConfigSpec struct {
@@ -200,7 +202,7 @@ func (b *Config) GetLogValues() []interface{} {
 
 // +kubebuilder:object:root=true
 
-// BackupConfigList contains a list of BackupConfig
+// ConfigList contains a list of Config
 type ConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

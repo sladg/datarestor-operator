@@ -4,14 +4,11 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
-	v1 "github.com/sladg/datarestor-operator/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func ShouldPerformBackupFromRepository(repoSpec v1.RepositorySpec) bool {
-	schedule := repoSpec.BackupSchedule
-	lastBackupTime := repoSpec.Status.LastScheduledBackupRun
-
-	if repoSpec.Status.InitializedAt == nil {
+func ShouldPerformBackupFromRepository(schedule string, lastBackupTime metav1.Time, initializedAt metav1.Time) bool {
+	if initializedAt.IsZero() {
 		return false
 	}
 
@@ -25,7 +22,7 @@ func ShouldPerformBackupFromRepository(repoSpec v1.RepositorySpec) bool {
 	}
 
 	// If no last backup time, it's time for a backup
-	if lastBackupTime == nil {
+	if lastBackupTime.IsZero() {
 		return true
 	}
 

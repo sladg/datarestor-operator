@@ -18,7 +18,10 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .spec.jobTemplate.template.spec.volumes[0].persistentVolumeClaim.claimName
+    - jsonPath: .spec.stopPods
+      name: Stop Pods
+      type: boolean
+    - jsonPath: .spec.pvcRef.name
       name: PVC
       type: string
     - jsonPath: .status.state
@@ -55,11 +58,6 @@ spec:
           spec:
             description: TaskSpec defines the desired state of
             properties:
-              annotation:
-                description: Annotation of the task, {repoName}#{hostName}#{backupName}
-                  or {hostName}#{backupName} or {backupName}
-                pattern: ^[a-zA-Z0-9-]+#([a-zA-Z0-9-]+#)?[a-zA-Z0-9-]+$
-                type: string
               jobTemplate:
                 description: Job template - if not specified, job will fail
                 type: object
@@ -67,6 +65,55 @@ spec:
               name:
                 description: Name of the task
                 type: string
+              pvcRef:
+                description: Reference to the PersistentVolumeClaim to back up or
+                  restore
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: |-
+                      If referring to a piece of an object instead of an entire object, this string
+                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]" (container with
+                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                      referencing a part of an object.
+                    type: string
+                  kind:
+                    description: |-
+                      Kind of the referent.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                    type: string
+                  name:
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                    type: string
+                  resourceVersion:
+                    description: |-
+                      Specific resourceVersion to which this reference is made, if any.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                    type: string
+                  uid:
+                    description: |-
+                      UID of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              stopPods:
+                default: false
+                description: StopPods specifies whether to scale down workloads using
+                  the PVCs matched by this selector.
+                type: boolean
               type:
                 description: Type of restic operation
                 enum:
@@ -77,6 +124,7 @@ spec:
                 type: string
             required:
             - name
+            - pvcRef
             - type
             type: object
           status:
@@ -302,7 +350,7 @@ spec:
                 type: string
               state:
                 description: High-level state derived from JobStatus (Pending, Running,
-                  Succeeded, Failed)
+                  Succeeded, Failed, ScalingDown, ScalingUp)
                 type: string
             type: object
         type: object

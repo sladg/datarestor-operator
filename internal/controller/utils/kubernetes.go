@@ -24,7 +24,7 @@ func IsObjectNotFound(ctx context.Context, deps *Dependencies, req ctrl.Request,
 	err := deps.Get(ctx, types.NamespacedName{Name: req.Name, Namespace: req.Namespace}, obj)
 	isNotFound := client.IgnoreNotFound(err) != nil
 	if err != nil {
-		log.Errorw("Failed to get object", "error", err, "name", req.Name, "namespace", req.Namespace)
+		log.Warn("Failed to get object", "name", req.Name, "namespace", req.Namespace)
 
 		return false, true
 	} else if isNotFound {

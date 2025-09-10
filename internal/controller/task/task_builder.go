@@ -18,6 +18,7 @@ type BuildTaskParams struct {
 	Env      []corev1.EnvVar
 	Args     []string
 	TaskType v1.TaskType
+	StopPods bool
 }
 
 func BuildTask(params BuildTaskParams) v1.Task {
@@ -101,6 +102,14 @@ func BuildTask(params BuildTaskParams) v1.Task {
 			Name:        taskSpecName,
 			Type:        params.TaskType,
 			JobTemplate: apiextensionsv1.JSON{Raw: jobSpecBytes},
+			StopPods:    params.StopPods,
+			PVCRef: corev1.ObjectReference{
+				APIVersion: params.PVC.APIVersion,
+				Kind:       params.PVC.Kind,
+				Name:       params.PVC.Name,
+				Namespace:  params.PVC.Namespace,
+				UID:        params.PVC.UID,
+			},
 		},
 	}
 
