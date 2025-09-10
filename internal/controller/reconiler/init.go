@@ -2,7 +2,6 @@ package reconcile_util
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/sladg/datarestor-operator/internal/constants"
@@ -33,13 +32,13 @@ func InitResource(ctx context.Context, deps *utils.Dependencies, resource client
 func CheckResource[T client.Object](ctx context.Context, deps *utils.Dependencies, req ctrl.Request, resource T) (bool, time.Duration, error) {
 	logger := deps.Logger.Named("[CheckResource]").With("resource", req.Name, "namespace", req.Namespace)
 
-	isNotFound, isError := utils.IsObjectNotFound(ctx, deps, req, resource)
+	isNotFound, isError, err := utils.IsObjectNotFound(ctx, deps, req, resource)
 	if isNotFound {
-		logger.Warn("Config not found, might have been deleted")
+		logger.Warn("Resource not found, might have been deleted")
 		return true, 0, nil
 	} else if isError {
-		logger.Error("Failed to get Config")
-		return true, 0, fmt.Errorf("failed to get Config")
+		logger.Errorw("Failed to get resource", err)
+		return true, 0, err
 	}
 
 	return false, constants.ImmediateRequeueInterval, nil

@@ -40,12 +40,14 @@ func (r *TasksReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	doObject := func() error { return r.Deps.Update(ctx, task) }
 	doStatus := func() error { return r.Deps.Status().Update(ctx, task) }
-	isActive := func() bool {
-		return task.Status.State == v1.TaskStateRunning || task.Status.State == v1.TaskStatePending
+
+	// @TODO: Fix this condition, we should also wait for scale up to happen before deleting
+	isNotActive := func() bool {
+		return task.Status.State != v1.TaskStateRunning && task.Status.State != v1.TaskStatePending
 	}
 
 	// Delete task if it is being deleted
-	reconcile, period, err = reconcile_util.DeleteResourceWithConditionalFn(ctx, r.Deps, task, constants.TaskFinalizer, isActive)
+	reconcile, period, err = reconcile_util.DeleteResourceWithConditionalFn(ctx, r.Deps, task, constants.TaskFinalizer, isNotActive)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 		return res, err
 	}
