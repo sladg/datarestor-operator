@@ -53,10 +53,6 @@ jobs:
             runner: ubuntu-latest
           - platform: linux/arm64
             runner: ubuntu-latest-arm64
-          - platform: darwin/amd64
-            runner: macos-latest
-          - platform: darwin/arm64
-            runner: macos-latest
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
@@ -69,12 +65,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ "${{ matrix.runner }}" = "macos-latest" ]; then
-            brew install make
-          else
-            sudo apt-get update
-            sudo apt-get install -y make
-          fi
+          sudo apt-get update
+          sudo apt-get install -y make
 
       - name: Generate manifests
         run: make manifests
