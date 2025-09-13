@@ -43,6 +43,13 @@ spec:
           command:
             - /bin/bash
             - -c
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 1000m
+              memory: 1000Mi
           args:
             - minio server /data --console-address :9001
           ports:
@@ -102,6 +109,13 @@ spec:
       containers:
         - name: mc
           image: minio/mc:latest
+          resources:
+            requests:
+              cpu: 50m
+              memory: 100Mi
+            limits:
+              cpu: 200m
+              memory: 200Mi
           command:
             - /bin/sh
             - -c

@@ -86,6 +86,13 @@ spec:
                 counter=$((counter + 1))
                 sleep 10
               done
+          resources:
+            requests:
+              cpu: 20m
+              memory: 20Mi
+            limits:
+              cpu: 100m
+              memory: 200Mi
           volumeMounts:
             - name: app-data
               mountPath: /data

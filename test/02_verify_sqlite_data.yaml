@@ -146,6 +146,13 @@ spec:
       command:
         - /bin/sh
         - -c
+      resources:
+        requests:
+          cpu: 100m
+          memory: 100Mi
+        limits:
+          cpu: 200m
+          memory: 200Mi
       args:
         - |
           apk add --no-cache sqlite

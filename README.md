@@ -140,7 +140,7 @@ spec:
 
 ## Installation (under construction)
 
-### Using Helm (Recommended)
+### Using Helm
 
 ```bash
 # Add the Helm repository
