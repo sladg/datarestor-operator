@@ -89,6 +89,7 @@ func FilterUnclaimedPVCs(managedPVCs []*corev1.PersistentVolumeClaim, Logger *za
 		if pvc.Annotations != nil && pvc.Annotations[constants.AnnRestore] != "" {
 			log.Debugw("PVC has manual restore annotation", "pvc", pvc.Name)
 			continue
+			// @FIXME: We continue here, but we process it later on in next loop when AnnRestore is removed because it was picked up by Manaul. Fix this.
 		}
 
 		log.Debugw("PVC qualifies as unclaimed", "pvc", pvc.Name)
@@ -114,3 +115,5 @@ func IsPVCDeletedOrBeingDeleted(ctx context.Context, deps *Dependencies, pvcRef 
 	// PVC found - check if it's being deleted
 	return pvc.DeletionTimestamp != nil
 }
+
+// @TODO: Check creation time of PVC vs. creation time of config. If PVC is older, skip it.

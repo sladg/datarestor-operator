@@ -51,8 +51,9 @@ jobs:
         include:
           - platform: linux/amd64
             runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-latest-arm64
+          # @TODO: Enable later, no runners on Github
+          # - platform: linux/arm64
+          #   runner: ubuntu-latest-arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout

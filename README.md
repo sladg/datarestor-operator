@@ -1,4 +1,6 @@
-# DataRestor Backup Operator
+# DataRestor Operator
+
+TL;DR - Restic backup/restore operator for automated PVC backup and restore. Painless DR.
 
 ## 🚧 UNDER CONSTRUCTION 🚧
 
@@ -61,14 +63,14 @@ kubectl annotate pvc my-pvc \
     backup.datarestor-operator.com/manual-restore='pre-upgrade-snapshot'
 ```
 
-Or we can specify snapshot ID (restic's ID) to restore from.
+Or we can specify snapshot name to restore from.
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/manual-restore='1234567890'
+    backup.datarestor-operator.com/manual-restore='backup-scheduled-2025-09-13-20-55-402b85'
 ```
 
-Or we can specify `latest`, `true`, or `now` to restore from the most recent snapshot (default for auto-restore).
+Or we can specify `latest`, `true`, `now` or `""` to restore from the most recent snapshot (default for auto-restore).
 
 ```sh
 kubectl annotate pvc my-pvc \
@@ -79,12 +81,12 @@ Or we can specify a specify repository (using priority or target) and different 
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/manual-restore='1#my-pvc-namespace-my-pvc-name#4dc109'
+    backup.datarestor-operator.com/manual-restore='1|my-pvc-namespace-my-pvc-name|4dc109'
 ```
 
 ```sh
 kubectl annotate pvc my-pvc \
-    backup.datarestor-operator.com/manual-restore='s3:http://minio:9000/pg#myns-mypvc-name#now'
+    backup.datarestor-operator.com/manual-restore='s3:http://minio:9000/pg|myns-mypvc-name|now'
 ```
 
 ---
