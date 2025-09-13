@@ -45,6 +45,7 @@ func PVCToRef(pvc *corev1.PersistentVolumeClaim) corev1.ObjectReference {
 		APIVersion: apiVersion,
 		Kind:       kind,
 		Name:       pvc.Name,
+		Namespace:  pvc.Namespace,
 		UID:        pvc.UID,
 	}
 }

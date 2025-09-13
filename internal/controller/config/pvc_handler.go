@@ -81,12 +81,7 @@ func PVCRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Config
 	)
 
 	if pvc.Annotations[constants.AnnRestore] == "" {
-		return false, -1, nil
-	}
-
-	// Skip PVCs that are being deleted to prevent race conditions
-	if utils.IsPVCBeingDeleted(pvc) {
-		logger.Info("Skipping restore for PVC in terminating state")
+		logger.Debug("No restore annotation detected, skipping")
 		return false, -1, nil
 	}
 

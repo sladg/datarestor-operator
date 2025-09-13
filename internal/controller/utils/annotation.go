@@ -14,9 +14,9 @@ func MakeAnnotation(existing map[string]string, new map[string]string) map[strin
 		if v == "" {
 			// Empty value should remove the key if it exists
 			delete(result, k)
-			continue
+		} else {
+			result[k] = v
 		}
-		result[k] = v
 	}
 
 	return result

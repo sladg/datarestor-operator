@@ -44,6 +44,7 @@ type Selector struct {
 	AutoRestore bool `json:"autoRestore,omitempty"`
 }
 
+// @TODO: Populate, add restores
 type ConfigStatistics struct {
 	// Number of backups run successfully so far
 	// +optional
@@ -75,9 +76,13 @@ type RepositorySpec struct {
 	// +required
 	// +kubebuilder:validation:Pattern=`^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1])) (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$`
 	// +kubebuilder:default="0 2 * * *"
-	BackupSchedule string `json:"backupSchedule,omitempty"`
+	BackupSchedule string `json:"backupSchedule"`
 
-	// @TODO: Add retention schedule
+	// Cron expression for retention schedule (e.g., "0 4 * * *" for daily at 4 AM). Default is weekly on Sunday at 4 AM.
+	// +required
+	// +kubebuilder:validation:Pattern=`^(\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])|\*\/([0-9]|1[0-9]|2[0-9]|3[0-9]|4[0-9]|5[0-9])) (\*|([1-9]|1[0-9]|2[0-9]|3[0-1])|\*\/([1-9]|1[0-9]|2[0-9]|3[0-1])) (\*|([1-9]|1[0-2])|\*\/([1-9]|1[0-2])) (\*|([0-6])|\*\/([0-6]))$`
+	// +kubebuilder:default="0 4 * * 0"
+	ForgotSchedule string `json:"forgotSchedule"`
 
 	// A list of selectors for PVCs to be backed up. A PVC is selected if it matches any of the selectors in this list.
 	// +optional
@@ -86,6 +91,12 @@ type RepositorySpec struct {
 	// Internal status of the repository
 	// +optional
 	Status RepositoryStatus `json:"-"`
+
+	// Arguments for the forgetter. Restic's CLI arguments. Such as `--keep-last 10` or `--keep-hourly 24` or `--keep-daily 7`.
+	// +required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:default={"--keep-last","10"}
+	ForgetArgs []string `json:"forgetArgs"`
 }
 
 type RepositoryStatus struct {

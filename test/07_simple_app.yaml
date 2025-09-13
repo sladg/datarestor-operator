@@ -38,11 +38,51 @@ spec:
             - -c
             - |
               echo "Starting data writer..."
-              DATA_FILE="/data/updates.log"
-              touch $DATA_FILE
+              DATA_DIR="/data"
+              SIGNAL_FILE="$DATA_DIR/last_write.signal"
+              LOG_FILE="$DATA_DIR/updates.log"
+              DATA_FILE="$DATA_DIR/data_$(date +%Y%m%d_%H%M%S).txt"
+
+              # Create data directory
+              mkdir -p $DATA_DIR
+
+              # Initialize files
+              touch $LOG_FILE
+              touch $SIGNAL_FILE
+
               counter=1
+              file_counter=1
+
               while true; do
-                echo "$(date): Update #$counter" >> $DATA_FILE
+                echo "=== Directory structure ==="
+                ls -laR /data
+                echo "=== End directory structure ==="
+
+                timestamp=$(date)
+                echo "$timestamp: Update #$counter" >> $LOG_FILE
+
+                # Create a new data file every 50 updates (roughly every 8 minutes)
+                if [ $((counter % 50)) -eq 0 ]; then
+                  DATA_FILE="$DATA_DIR/data_$(date +%Y%m%d_%H%M%S).txt"
+                  file_counter=$((file_counter + 1))
+                fi
+
+                # Write substantial data to the current data file
+                echo "=== Data Entry #$counter at $timestamp ===" >> $DATA_FILE
+                echo "File: $DATA_FILE" >> $DATA_FILE
+                echo "Counter: $counter" >> $DATA_FILE
+                echo "Timestamp: $timestamp" >> $DATA_FILE
+                echo "Random data: $(head -c 1024 /dev/urandom | base64)" >> $DATA_FILE
+                echo "More random data: $(head -c 1024 /dev/urandom | base64)" >> $DATA_FILE
+                echo "End of entry $counter" >> $DATA_FILE
+                echo "" >> $DATA_FILE
+
+                # Update signal file with last write time
+                echo "$timestamp" > $SIGNAL_FILE
+                echo "Last write: $timestamp" > $SIGNAL_FILE
+                echo "Files created: $file_counter" >> $SIGNAL_FILE
+                echo "Total updates: $counter" >> $SIGNAL_FILE
+
                 counter=$((counter + 1))
                 sleep 10
               done

@@ -86,6 +86,11 @@ func FilterUnclaimedPVCs(managedPVCs []*corev1.PersistentVolumeClaim, Logger *za
 			continue
 		}
 
+		if pvc.Annotations != nil && pvc.Annotations[constants.AnnRestore] != "" {
+			log.Debugw("PVC has manual restore annotation", "pvc", pvc.Name)
+			continue
+		}
+
 		log.Debugw("PVC qualifies as unclaimed", "pvc", pvc.Name)
 		newPVCs = append(newPVCs, pvc)
 	}

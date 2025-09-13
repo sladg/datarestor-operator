@@ -4,8 +4,9 @@ metadata:
   name: simple-app-data-restore
   labels:
     backup: "true"
-  # annotations:
-  #   backup.datarestor-operator.com/auto-restore: "1#default-simple-app-data#now"
+  annotations:
+    backup.datarestor-operator.com/auto-restore-processed: ""
+    backup.datarestor-operator.com/manual-restore: "s3:http://minio.backup-test:9000/onsite-backups|default-simple-app-data|backup-scheduled-2025-913-138-131-200-e8f478"
 spec:
   accessModes:
     - ReadWriteOnce
@@ -14,23 +15,35 @@ spec:
       storage: 100Mi
   storageClassName: standard
 ---
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: restore-tree-logger-2
+  name: restore-test-app
+  labels:
+    app: restore-test-app
 spec:
-  containers:
-    - name: logger
-      image: busybox:1.35
-      command: ["/bin/sh", "-c"]
-      args:
-        - |
-          echo "Dumping /data tree";
-          ls -laR /data || true;
-      volumeMounts:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: restore-test-app
+  template:
+    metadata:
+      labels:
+        app: restore-test-app
+    spec:
+      containers:
+        - name: logger
+          image: busybox:1.35
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Dumping /data tree from $(hostname)";
+              ls -laR /data || true;
+              sleep 30;
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
         - name: data
-          mountPath: /data
-  volumes:
-    - name: data
-      persistentVolumeClaim:
-        claimName: simple-app-data-restore
+          persistentVolumeClaim:
+            claimName: simple-app-data-restore

@@ -52,7 +52,7 @@ func BuildTask(params BuildTaskParams) v1.Task {
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Labels: map[string]string{
-					"managed-by":                       v1.OperatorDomain,
+					// Do not set managed-by label, it has to be empty in order for k8s to manage it automatically
 					constants.LabelTaskParentName:      params.Config.Name,
 					constants.LabelTaskParentNamespace: params.Config.Namespace,
 					constants.LabelTaskType:            string(params.TaskType),

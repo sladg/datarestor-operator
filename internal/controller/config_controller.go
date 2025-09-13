@@ -25,20 +25,21 @@ type ConfigReconciler struct {
 	Deps *utils.Dependencies
 }
 
+// ------------------------------------------------------------
 // ConfigReconciler RBAC permissions
-// Core resources the controller manages:
+//
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=configs,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=configs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=configs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=tasks,verbs=get;list;watch;create;update;patch;delete
 //
-// Tasks the controller creates:
-// +kubebuilder:rbac:groups=backup.datarestor-operator.com,resources=tasks,verbs=get;list;watch;create
-//
+// ------------------------------------------------------------
 // Kubernetes resources the controller interacts with:
+//
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="apps",resources=deployments;replicasets;statefulsets,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch
 
 //nolint:gocyclo
 func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

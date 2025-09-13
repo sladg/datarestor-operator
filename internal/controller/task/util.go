@@ -28,7 +28,7 @@ type UniqueNameParams struct {
 func GenerateUniqueName(params UniqueNameParams) (string, string) {
 	shortUUID := uuid.NewUUID()[:6] // Use first 6 characters for cleaner names
 	businessName := string(params.TaskType)
-	timestamp := time.Now().Format("2006-12-28-23-50")
+	timestamp := time.Now().Format("2006-01-02-15-04")
 	uniqueName := fmt.Sprintf("%s-%s-%s", businessName, timestamp, shortUUID)
 
 	return uniqueName, businessName

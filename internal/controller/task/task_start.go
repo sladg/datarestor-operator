@@ -37,6 +37,7 @@ func Start(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (reconc
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      task.Name + "-job",
 			Namespace: task.Namespace,
+			// Do not set managed-by label, it has to be empty in order for k8s to manage it automatically
 			OwnerReferences: []metav1.OwnerReference{
 				// While job is active, task should not be deleted
 				utils.TaskToOwnerReference(task),

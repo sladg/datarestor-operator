@@ -21,23 +21,17 @@ func AutoRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Confi
 	)
 
 	if len(pvcResult.UnclaimedPVCs) == 0 {
+		logger.Debug("No unclaimed PVCs detected")
 		return false, -1, nil
 	}
 
 	if !config.Spec.AutoRestore {
+		logger.Debug("Auto-restore is disabled")
 		return false, -1, nil
 	}
 
 	for _, pvc := range pvcResult.UnclaimedPVCs {
 		log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
-
-		// Skip PVCs that are being deleted to prevent race conditions
-		if utils.IsPVCBeingDeleted(pvc) {
-			log.Info("Skipping PVC in terminating state")
-			continue
-		}
-
-		log.Info("New unclaimed PVC detected")
 
 		taskName, taskSpecName := task_util.GenerateUniqueName(task_util.UniqueNameParams{
 			PVC:      pvc,
@@ -73,7 +67,7 @@ func AutoRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Confi
 			return true, constants.QuickRequeueInterval, nil
 		}
 
-		log.Info("Created restore task for new PVC")
+		log.Info("Created restore task for unclaimed PVC")
 
 		// Mark PVC for auto-restore
 		annotations := utils.MakeAnnotation(pvc.Annotations, map[string]string{constants.AnnAutoRestored: "true"})

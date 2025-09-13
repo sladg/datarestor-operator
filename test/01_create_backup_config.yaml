@@ -18,13 +18,11 @@ spec:
         - default
     - matchLabels:
         backup: "true"
-      stopPods: true
-      autoRestore: false
 
   repositories:
     - target: s3:http://minio.backup-test:9000/onsite-backups
       priority: 1
-      backupSchedule: "0 2 * * *" # every night at 02:00
+      backupSchedule: "*/5 * * * *" # every 5 minutes  env:
       env:
         - name: RESTIC_PASSWORD
           value: mySuperSecret123
