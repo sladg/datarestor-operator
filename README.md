@@ -13,12 +13,6 @@ A cheap, self-host-friendly operator that copies your volumes data on a schedule
 
 Because I hate thinking of Disaster Recovery. When shit hits fan, I want to just re-apply everything without googling around and updating yamls one by one while everything is on fire. I want single YAML to handle restoring everything without me needing to dig around documentations and trying to remember what needs to be manually updated where.
 
-- Configure once with a `Config`, then forget about it.
-- New PVC appears? It’s backed up automatically.
-- Cluster goes boom? Re-deploy the operator and it re-hydrates your volumes — no wall of YAML, no `kubectl cp`, no manual intervention.
-
-Perfect for disaster recovery, painless migrations, simple rollbacks on failed upgrades.
-
 ## Philosophy
 
 - Existing YAMLs work in DR scenarios.
@@ -27,14 +21,12 @@ Perfect for disaster recovery, painless migrations, simple rollbacks on failed u
 
 ## Features
 
-- **Automated Backups**: Schedule backups using cron expressions
-- **Automated Retention**: Schedule cleanup of old snapshots using restic forget
-- **Auto-Restore**: Automatically restore new PVCs from existing backups
-- **Manual Operations**: Trigger backups and restores via annotations
-- **Multi-Repository Support**: Backup to multiple repositories with priority ordering
-- **Workload Management**: Scale down workloads during backup/restore operations
-- **PVC Selection**: Flexible PVC selection using label selectors and namespace filters
 - **Restore from one PVC into completely different one**: You can annotate any PVC to restore from any other PVC.
+- **House is on fire?** - No prob, just re-deploy the operator, apply original Config for it. Then re-apply all workloads, pvc, etc. PVCs will be automagically restored from backups based on their NS and Name.
+- **Upgrade failed?** - No prob, annotate the PVC with `backup.datarestor-operator.com/manual-restore='latest'` and it will be restored from the most recent snapshot (or any other/older snapshot you want to restore from).
+- **Auto Backups** - Cron expression, namespace+label selectors, multiple restic-supported storage targets, old snapshot removel with `--keep-last`, `--keep-daily`, `--keep-hourly` args.
+- **Manual Interventions made simple**: Trigger backups and restores via annotations, no need to dig in yaml. Just annotate the PVC from CLI with anything you want and be done with it.
+- **Workload Management**: Backups/Restores can scale down (and back up) workloads during backup/restore operations to prevent FS conflicts and corruption.
 
 ### Common Operations (via Annotations)
 
