@@ -88,23 +88,22 @@ kubectl annotate pvc my-pvc \
 - [x] Add finalizers to workloads to prevent pod startup until an auto-restore is complete.
 - [x] Automatically scale associated workloads (Deployments, etc.) up/down when `stopPods` is used.
 - [x] Update RBAC to ensure least-privilege permissions.
-- [ ] Enable maintenance on repository - keep last N snapshots, prune old snapshots, verify snapshots.
-- [ ] Add support for snapshot verification.
+- [x] Enable maintenance on repository - keep last N snapshots, prune old snapshots, verify snapshots.
 - [x] Verify automatic-populate on newly created PVCs,
 - [x] Verify manual restore on existing PVC,
 - [x] Verify manual restore on new PVC (specify other PVC to restore from),
-- [ ] Allow for passing args to backups, restores, etc.
-- [ ] Improve matching of repositories and checking for snapshots when restoring.
-- [ ] Use restic's JSON output for improved matching of snapshots from annotation and auto-restore.
+- [x] Fix CRD statuses to correctly match and update based on events.
 - [ ] Verify working with sqlite database with continuous writes.
-- [ ] Fix CRD statuses to correctly match and update based on events.
+- [ ] Allow for extended configuration of restic (compression, pruning, etc.)
+- [ ] Verify working with PostgreSQL database with continuous writes.
 - [ ] Support secrets refs in envs.
+- [ ] Add support for snapshot verification.
 - [ ] Improve how we find auto-restore snapshot. We should go one-by-one based on repository priority and see if backup exists. If not, we should move to next repository.
 - [ ] (Future) Fix permissions for secrets (envs) in CRDs.
-- [ ] (Future) Allow for snapshots of volumes so quicker backups/restores.
+- [ ] (Future) Allow for snapshots of volumes instead of copy-paste of file system - quicker backups/restores.
 - [ ] (Future) E2E tests for mid-operation deletions, we should correctly unlock and proceed without blocking anything.
 - [ ] (Future) Scan Restic and in case of deletion / pruning, prune our Tasks that no longer refence backups in repository.
-- [ ] (Future) Save information about size of backups/restores, duration of how long it took, etc.
+- [ ] (Future) Config to have information about size of backups/restores, duration of how long it took, etc. Also, include number of backups, successes
 
 ---
 

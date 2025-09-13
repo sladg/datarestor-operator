@@ -49,6 +49,15 @@ func convertEnv(env []corev1.EnvVar) []string {
 	return envs
 }
 
+// setupResticCommandWithCache creates a restic command with cache environment setup for commands that need --no-cache
+func setupResticCommandWithCache(ctx context.Context, args []string, env []corev1.EnvVar) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "restic", args...)
+	// Provide sane defaults first, then allow provided env to override
+	cmd.Env = append(cmd.Env, "HOME=/tmp", "RESTIC_CACHE_DIR=/tmp/restic-cache")
+	cmd.Env = append(cmd.Env, convertEnv(env)...)
+	return cmd
+}
+
 func ExecInit(ctx context.Context, logger *zap.SugaredLogger, repoTarget string, env []corev1.EnvVar) (string, error) {
 	arguments := []string{"init", "--repo", repoTarget}
 	// append extras
@@ -85,8 +94,7 @@ func ExecCheckSnapshotExists(ctx context.Context, logger *zap.SugaredLogger, env
 	arguments := []string{"snapshots"}
 	arguments = append(arguments, args...)
 
-	cmd := exec.CommandContext(ctx, "restic", arguments...)
-	cmd.Env = append(cmd.Env, convertEnv(env)...)
+	cmd := setupResticCommandWithCache(ctx, arguments, env)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -108,14 +116,11 @@ type Snapshot struct {
 
 // ExecListSnapshots executes `restic snapshots --json` with the provided args and parses the JSON output.
 func ExecListSnapshots(ctx context.Context, logger *zap.SugaredLogger, env []corev1.EnvVar, args ...string) ([]Snapshot, error) {
-	// Use global option --no-cache to avoid HOME/XDG cache warnings; parse stdout only
-	arguments := []string{"--no-cache", "snapshots", "--json"}
+	// Use cache directory to avoid HOME/XDG cache warnings; parse stdout only
+	arguments := []string{"snapshots", "--json"}
 	arguments = append(arguments, args...)
 
-	cmd := exec.CommandContext(ctx, "restic", arguments...)
-	// Provide sane defaults first, then allow provided env to override
-	cmd.Env = append(cmd.Env, "HOME=/tmp", "RESTIC_CACHE_DIR=/tmp/restic-cache")
-	cmd.Env = append(cmd.Env, convertEnv(env)...)
+	cmd := setupResticCommandWithCache(ctx, arguments, env)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -133,4 +138,20 @@ func ExecListSnapshots(ctx context.Context, logger *zap.SugaredLogger, env []cor
 		return nil, fmt.Errorf("parse snapshots json failed: %w", err)
 	}
 	return snaps, nil
+}
+
+// ExecForget executes `restic forget` with the provided args.
+func ExecForget(ctx context.Context, logger *zap.SugaredLogger, repoTarget string, env []corev1.EnvVar, args ...string) (string, error) {
+	arguments := []string{"forget", "--repo", repoTarget}
+	arguments = append(arguments, args...)
+
+	cmd := setupResticCommandWithCache(ctx, arguments, env)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Errorw("Restic forget failed", err, "output", string(output))
+		return string(output), fmt.Errorf("restic forget failed: %w, output: %s", err, string(output))
+	}
+
+	return string(output), nil
 }

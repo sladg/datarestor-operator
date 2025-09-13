@@ -156,6 +156,12 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return res, err
 	}
 
+	// Process scheduled forget operations for each repository. Run one-by-one.
+	reconcile, period, _ = config_util.ScheduleForgetRepositories(ctx, deps, config)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+		return res, err
+	}
+
 	// @TODO: Allow for repositories to be annotated for restore/backup
 
 	// @TODO: Add/Remove finalizer based on tasks running

@@ -447,6 +447,11 @@ spec:
                         for this target
                       format: date-time
                       type: string
+                    lastScheduledForgetRun:
+                      description: Information about the last scheduled forget run
+                        for this target
+                      format: date-time
+                      type: string
                     target:
                       description: Restic repository target (e.g., s3:s3.amazonaws.com/bucket/path)
                       type: string

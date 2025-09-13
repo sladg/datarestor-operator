@@ -43,7 +43,7 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 	for i, spec := range config.Spec.Repositories {
 		repository := &config.Status.Repositories[i]
 
-		shouldUpdate := utils.ShouldPerformBackupFromRepository(spec.BackupSchedule, repository.LastScheduledBackupRun, repository.InitializedAt)
+		shouldUpdate := utils.ShouldPerformScheduledOperation(spec.BackupSchedule, repository.LastScheduledBackupRun, repository.InitializedAt)
 		if !shouldUpdate {
 			continue
 		}
@@ -98,6 +98,47 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 		}
 
 		// We have scheduled lot of backups, let them process before reconcile again
+		return true, constants.LongerRequeueInterval, nil
+	}
+
+	return false, -1, nil
+}
+
+func ScheduleForgetRepositories(ctx context.Context, deps *utils.Dependencies, config *v1.Config) (bool, time.Duration, error) {
+	logger := deps.Logger.Named("[ScheduleForgetRepositories]").With(
+		"config", config.Name,
+		"configNamespace", config.Namespace,
+	)
+
+	for i, spec := range config.Spec.Repositories {
+		repository := &config.Status.Repositories[i]
+
+		shouldUpdate := utils.ShouldPerformScheduledOperation(spec.ForgotSchedule, repository.LastScheduledForgetRun, repository.InitializedAt)
+		if !shouldUpdate {
+			continue
+		}
+
+		logger.Info("Scheduled forget operation triggered")
+
+		// Update the last scheduled forget run time
+		repository.LastScheduledForgetRun = metav1.Now()
+
+		// Execute forget command inline
+		selectedRepo := restic.SelectRepository(restic.MakeArgsParams{
+			Repositories: []v1.RepositorySpec{spec},
+			Env:          config.Spec.Env,
+		})
+		mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
+
+		output, err := restic.ExecForget(ctx, deps.Logger, selectedRepo.Target, mergedEnv, spec.ForgetArgs...)
+		if err != nil {
+			logger.Errorw("Failed to execute forget operation", "error", err, "output", output)
+			return true, constants.DefaultRequeueInterval, err
+		}
+
+		logger.Infow("Successfully executed forget operation", "output", output)
+
+		// We have executed forget, let it process before reconcile again
 		return true, constants.LongerRequeueInterval, nil
 	}
 

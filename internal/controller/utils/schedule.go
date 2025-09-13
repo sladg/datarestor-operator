@@ -7,7 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func ShouldPerformBackupFromRepository(schedule string, lastBackupTime metav1.Time, initializedAt metav1.Time) bool {
+func ShouldPerformScheduledOperation(schedule string, lastRunTime metav1.Time, initializedAt metav1.Time) bool {
 	if initializedAt.IsZero() {
 		return false
 	}
@@ -21,14 +21,14 @@ func ShouldPerformBackupFromRepository(schedule string, lastBackupTime metav1.Ti
 		return false
 	}
 
-	// If no last backup time, it's time for a backup
-	if lastBackupTime.IsZero() {
+	// If no last run time, it's time for the operation
+	if lastRunTime.IsZero() {
 		return true
 	}
 
-	// Get next scheduled time after last backup
-	nextBackup := cronSchedule.Next(lastBackupTime.Time)
+	// Get next scheduled time after last run
+	nextRun := cronSchedule.Next(lastRunTime.Time)
 
-	// If next scheduled time is in the past, it's time for a backup
-	return time.Now().After(nextBackup)
+	// If next scheduled time is in the past, it's time for the operation
+	return time.Now().After(nextRun)
 }

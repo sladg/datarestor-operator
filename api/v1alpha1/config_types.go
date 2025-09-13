@@ -120,6 +120,10 @@ type RepositoryStatus struct {
 	// It lists the snapshots and annotates the PVCs with the information
 	// +optional
 	LastBackupSyncRun metav1.Time `json:"lastBackupSyncRun"`
+
+	// Information about the last scheduled forget run for this target
+	// +optional
+	LastScheduledForgetRun metav1.Time `json:"lastScheduledForgetRun"`
 }
 
 type WorkloadInfo struct {
