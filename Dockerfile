@@ -11,8 +11,16 @@ COPY go.sum go.sum
 # and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
+## Download pre-built restic binary (faster than building from source)
+RUN RESTIC_VERSION=0.16.4 && \
+    apt-get update && apt-get install -y bzip2 && \
+    wget -O restic-binary.bz2 https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_${TARGETOS}_${TARGETARCH}.bz2 && \
+    bunzip2 restic-binary.bz2 && \
+    chmod +x restic-binary
+
+# This is slow as well on Github CI with cross-compilation
 # Build restic binary from our dependency (ensures version consistency)
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o restic-binary github.com/restic/restic/cmd/restic
+# RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o restic-binary github.com/restic/restic/cmd/restic
 
 # Copy the go source
 COPY cmd/main.go cmd/main.go
