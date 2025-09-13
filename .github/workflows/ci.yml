@@ -137,7 +137,12 @@ jobs:
         run: make generate
 
       - name: Generate Helm chart
-        run: make helm
+        run: |
+          make helm
+          # Set chart version to match git tag
+          CHART_VERSION=${GITHUB_REF#refs/tags/v}
+          sed -i "s/version: .*/version: $CHART_VERSION/" charts/datarestor-operator/Chart.yaml
+          sed -i "s/appVersion: .*/appVersion: \"$CHART_VERSION\"/" charts/datarestor-operator/Chart.yaml
 
       - name: Lint Helm chart
         run: make helm-lint
