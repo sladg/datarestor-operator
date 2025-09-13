@@ -4,9 +4,10 @@ metadata:
   name: simple-app-data-restore
   labels:
     backup: "true"
-  annotations:
-    backup.datarestor-operator.com/auto-restore-processed: ""
-    backup.datarestor-operator.com/manual-restore: "s3:http://minio.backup-test:9000/onsite-backups|default-simple-app-data|backup-scheduled-2025-913-138-131-200-e8f478"
+  # annotations:
+  # []
+  # backup.datarestor-operator.com/auto-restore-processed: ""
+  # backup.datarestor-operator.com/manual-restore: "s3:http://minio.backup-test:9000/onsite-backups|default-simple-app-data|backup-scheduled-2025-913-138-131-200-e8f478"
 spec:
   accessModes:
     - ReadWriteOnce
@@ -35,6 +36,13 @@ spec:
         - name: logger
           image: busybox:1.35
           command: ["/bin/sh", "-c"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 10Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
           args:
             - |
               echo "Dumping /data tree from $(hostname)";

@@ -67,28 +67,29 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= kind
 
-# .PHONY: setup-test-e2e
-# setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-# 	@command -v $(KIND) >/dev/null 2>&1 || { \
-# 		echo "Kind is not installed. Please install Kind manually."; \
-# 		exit 1; \
-# 	}
-# 	@case "$$($(KIND) get clusters)" in \
-# 		*"$(KIND_CLUSTER)"*) \
-# 			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-# 		*) \
-# 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-# 			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-# 	esac
+.PHONY: setup-test-e2e
+setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
+	@command -v $(KIND) >/dev/null 2>&1 || { \
+		echo "Kind is not installed. Please install Kind manually."; \
+		exit 1; \
+	}
+	@case "$$($(KIND) get clusters)" in \
+		*"$(KIND_CLUSTER)"*) \
+			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
+		*) \
+			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
+			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
+		esac
 
-# .PHONY: test-e2e
-# test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-# 	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v
-# 	$(MAKE) cleanup-test-e2e
+.PHONY: test-e2e
+test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
+	@echo "Running e2e tests..."
+	KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -tags=e2e
+	$(MAKE) cleanup-test-e2e
 
-# .PHONY: cleanup-test-e2e
-# cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-# 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+.PHONY: cleanup-test-e2e
+cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
+	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -146,6 +147,53 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
+##@ Helm
+
+# Helm chart directory
+HELM_CHART_DIR ?= charts/datarestor-operator
+
+.PHONY: helmify
+helmify: $(HELMIFY) ## Download helmify locally if necessary.
+
+.PHONY: helm
+helm: manifests kustomize helmify ## Generate Helm chart from Kustomize manifests using helmify
+	@echo "Generating Helm chart using helmify..."
+	@mkdir -p charts
+	@cd charts && $(KUSTOMIZE) build ../config/default | $(HELMIFY) datarestor-operator
+	@echo "Helm chart generated in $(HELM_CHART_DIR)"
+
+.PHONY: helm-package
+helm-package: helm ## Package the Helm chart
+	helm package $(HELM_CHART_DIR) -d dist/
+
+.PHONY: helm-lint
+helm-lint: helm ## Lint the Helm chart
+	helm lint $(HELM_CHART_DIR)
+
+.PHONY: helm-template
+helm-template: helm ## Generate Helm templates
+	helm template datarestor-operator $(HELM_CHART_DIR)
+
+.PHONY: helm-dry-run
+helm-dry-run: helm ## Dry run Helm installation
+	helm install datarestor-operator $(HELM_CHART_DIR) --dry-run --debug
+
+.PHONY: helm-install
+helm-install: helm ## Install the Helm chart
+	helm install datarestor-operator $(HELM_CHART_DIR) --namespace datarestor-operator-system --create-namespace
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall the Helm chart
+	helm uninstall datarestor-operator --namespace datarestor-operator-system
+
+.PHONY: helm-upgrade
+helm-upgrade: helm ## Upgrade the Helm chart
+	helm upgrade datarestor-operator $(HELM_CHART_DIR) --namespace datarestor-operator-system
+
+.PHONY: helm-test
+helm-test: ## Test the Helm chart
+	helm test datarestor-operator --namespace datarestor-operator-system
+
 ##@ Deployment
 
 ifndef ignore-not-found
@@ -191,6 +239,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+HELMIFY ?= $(LOCALBIN)/helmify
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
@@ -200,6 +249,7 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.1.6
+HELMIFY_VERSION ?= v0.4.4
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -228,6 +278,11 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+.PHONY: helmify
+helmify: $(HELMIFY) ## Download helmify locally if necessary.
+$(HELMIFY): $(LOCALBIN)
+	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
