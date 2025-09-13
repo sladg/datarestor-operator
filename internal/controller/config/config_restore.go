@@ -26,12 +26,24 @@ func ConfigRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Con
 	for _, pvc := range pvcResult.MatchedPVCs {
 		log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
 
+		// Skip PVCs that are being deleted to prevent race conditions
+		if utils.IsPVCBeingDeleted(pvc) {
+			log.Info("Skipping restore for PVC in terminating state")
+			continue
+		}
+
+		taskName, taskSpecName := task_util.GenerateUniqueName(task_util.UniqueNameParams{
+			PVC:      pvc,
+			TaskType: v1.TaskTypeRestoreManual,
+		})
+
 		// Prepare restore args
 		params := restic.MakeArgsParams{
 			Repositories: config.Spec.Repositories,
 			Env:          config.Spec.Env,
 			TargetPVC:    pvc,
 			Annotation:   config.Annotations[constants.AnnRestore],
+			TaskName:     taskName,
 		}
 
 		args := restic.MakeRestoreArgs(params)
@@ -40,12 +52,14 @@ func ConfigRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Con
 
 		// Prepare restore task for pvc
 		restoreTask := task_util.BuildTask(task_util.BuildTaskParams{
-			Config:   config,
-			PVC:      pvc,
-			Env:      mergedEnv,
-			Args:     args,
-			TaskType: v1.TaskTypeRestoreManual,
-			StopPods: config.Spec.StopPods,
+			Config:       config,
+			PVC:          pvc,
+			Env:          mergedEnv,
+			Args:         args,
+			StopPods:     config.Spec.StopPods,
+			TaskName:     taskName,
+			TaskSpecName: taskSpecName,
+			TaskType:     v1.TaskTypeRestoreManual,
 		})
 
 		// Create it

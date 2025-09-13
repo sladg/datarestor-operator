@@ -413,6 +413,12 @@ spec:
                       description: Time when the repository was initialized
                       format: date-time
                       type: string
+                    lastBackupSyncRun:
+                      description: |-
+                        Information about the last backup sync run for this target
+                        It lists the snapshots and annotates the PVCs with the information
+                      format: date-time
+                      type: string
                     lastScheduledBackupRun:
                       description: Information about the last scheduled backup run
                         for this target
@@ -424,7 +430,9 @@ spec:
                   type: object
                 type: array
               statistics:
-                description: Statistics about the repository
+                description: |-
+                  Statistics about the repository
+                  @TODO: Implement this.
                 properties:
                   failedBackups:
                     description: Number of backups run failed so far

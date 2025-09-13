@@ -26,12 +26,18 @@ func ConfigBackup(ctx context.Context, deps *utils.Dependencies, config *v1.Conf
 	for _, pvc := range pvcResult.MatchedPVCs {
 		log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
 
+		taskName, taskSpecName := task_util.GenerateUniqueName(task_util.UniqueNameParams{
+			PVC:      pvc,
+			TaskType: v1.TaskTypeBackupManual,
+		})
+
 		// Prepare backup args
 		params := restic.MakeArgsParams{
 			Repositories: config.Spec.Repositories,
 			Env:          config.Spec.Env,
 			TargetPVC:    pvc,
 			Annotation:   config.Annotations[constants.AnnBackup],
+			TaskName:     taskName,
 		}
 
 		args := restic.MakeBackupArgs(params)
@@ -40,12 +46,14 @@ func ConfigBackup(ctx context.Context, deps *utils.Dependencies, config *v1.Conf
 
 		// Prepare backup task for pvc
 		backupTask := task_util.BuildTask(task_util.BuildTaskParams{
-			Config:   config,
-			PVC:      pvc,
-			Env:      mergedEnv,
-			Args:     args,
-			TaskType: v1.TaskTypeBackupManual,
-			StopPods: config.Spec.StopPods,
+			Config:       config,
+			PVC:          pvc,
+			Env:          mergedEnv,
+			Args:         args,
+			StopPods:     config.Spec.StopPods,
+			TaskName:     taskName,
+			TaskSpecName: taskSpecName,
+			TaskType:     v1.TaskTypeBackupManual,
 		})
 
 		// Create it

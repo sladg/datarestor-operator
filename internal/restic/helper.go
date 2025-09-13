@@ -8,7 +8,6 @@ import (
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/uuid"
 )
 
 type MakeArgsParams struct {
@@ -16,6 +15,7 @@ type MakeArgsParams struct {
 	Env          []corev1.EnvVar
 	TargetPVC    *corev1.PersistentVolumeClaim
 	Annotation   string
+	TaskName     string
 }
 
 func isNumber(s string) (int32, bool) {
@@ -29,18 +29,25 @@ func GetHostFromPVC(pvc *corev1.PersistentVolumeClaim) string {
 }
 
 func convertStringToRepoNameArgs(params MakeArgsParams) []string {
-	parts := strings.Split(params.Annotation, "#")
+	parts := strings.Split(params.Annotation, "|")
 
-	if len(parts) == 3 && parts[0] != "" {
-		if num, isNumber := isNumber(parts[0]); isNumber {
+	if len(parts) >= 3 {
+		repoIdentifier := parts[len(parts)-3]
+		if repoIdentifier != "" {
+			if num, isNumber := isNumber(repoIdentifier); isNumber {
+				for _, repo := range params.Repositories {
+					if repo.Priority == num {
+						return []string{fmt.Sprintf("--repo=%s", repo.Target)}
+					}
+				}
+			}
+
 			for _, repo := range params.Repositories {
-				if repo.Priority == num {
+				if repo.Target == repoIdentifier {
 					return []string{fmt.Sprintf("--repo=%s", repo.Target)}
 				}
 			}
 		}
-
-		return []string{fmt.Sprintf("--repo=%s", parts[0])}
 	}
 
 	priorityRepo := params.Repositories[0]
@@ -58,7 +65,7 @@ func convertStringToRepoNameArgs(params MakeArgsParams) []string {
 // the repository with that priority. When a literal repo target is provided,
 // it will match by Target; if not found, it falls back to the priority repo.
 func SelectRepository(params MakeArgsParams) v1.RepositorySpec {
-	parts := strings.Split(params.Annotation, "#")
+	parts := strings.Split(params.Annotation, "|")
 
 	// Find lowest priority repo as default
 	priorityRepo := params.Repositories[0]
@@ -90,13 +97,12 @@ func SelectRepository(params MakeArgsParams) v1.RepositorySpec {
 }
 
 func convertStringToHostArgs(params MakeArgsParams) []string {
-	parts := strings.Split(params.Annotation, "#")
-	if len(parts) == 3 && parts[1] != "" {
-		return []string{fmt.Sprintf("--host=%s", parts[1])}
-	}
-
-	if len(parts) == 2 && parts[0] != "" {
-		return []string{fmt.Sprintf("--host=%s", parts[0])}
+	parts := strings.Split(params.Annotation, "|")
+	if len(parts) >= 2 {
+		host := parts[len(parts)-2]
+		if host != "" {
+			return []string{fmt.Sprintf("--host=%s", host)}
+		}
 	}
 
 	return []string{fmt.Sprintf("--host=%s", GetHostFromPVC(params.TargetPVC))}
@@ -105,38 +111,42 @@ func convertStringToHostArgs(params MakeArgsParams) []string {
 var LatestAcceptableValues = []string{"latest", "true", "now", ""}
 
 func convertStringToNameArgs(params MakeArgsParams) []string {
-	parts := strings.Split(params.Annotation, "#")
-	if len(parts) == 3 {
-		name := parts[2]
-		if utils.Contains(LatestAcceptableValues, name) {
-			return []string{"latest"}
-		}
-		return []string{"--tag", fmt.Sprintf("name=%s", name), "latest"}
+	parts := strings.Split(params.Annotation, "|")
+	var name string
+
+	if len(parts) > 1 { // If we have pipes, the name is the last part
+		name = parts[len(parts)-1]
+	} else { // No pipes, the whole annotation is the name/id
+		name = params.Annotation
 	}
 
-	if len(parts) == 2 {
-		name := parts[1]
-		if utils.Contains(LatestAcceptableValues, name) {
-			return []string{"latest"}
-		}
-		return []string{"--tag", fmt.Sprintf("name=%s", name), "latest"}
-	}
-
-	if utils.Contains(LatestAcceptableValues, params.Annotation) {
+	if utils.Contains(LatestAcceptableValues, name) {
 		return []string{"latest"}
 	}
 
+	// If it was a multi-part annotation, we want to treat the name as a tag.
+	// If it was a single part annotation, it's a snapshot ID.
+	if len(parts) > 1 {
+		return []string{"--tag", fmt.Sprintf("name=%s", name), "latest"}
+	}
+
 	// Treat as snapshot ID/prefix
-	return []string{params.Annotation}
+	return []string{name}
 }
 
 func convertParamsToBackupName(params MakeArgsParams) []string {
-	if params.Annotation == "true" || params.Annotation == "now" || params.Annotation == "" {
-		// If nothing is provided, generate a short random name
-		return []string{"--tag", fmt.Sprintf("name=%s", uuid.NewUUID()[:6])}
+	parts := strings.Split(params.Annotation, "|")
+	if len(parts) > 0 {
+		name := parts[len(parts)-1]
+		if utils.Contains(LatestAcceptableValues, name) {
+			return []string{"--tag", fmt.Sprintf("name=%s", params.TaskName)}
+		}
+		if name != "" {
+			return []string{"--tag", fmt.Sprintf("name=%s", name)}
+		}
 	}
 
-	return []string{"--tag", fmt.Sprintf("name=%s", params.Annotation)}
+	return []string{"--tag", fmt.Sprintf("name=%s", params.TaskName)}
 }
 
 func MakeRestoreArgs(params MakeArgsParams) []string {

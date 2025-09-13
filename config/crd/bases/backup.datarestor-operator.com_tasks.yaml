@@ -27,9 +27,6 @@ spec:
     - jsonPath: .status.state
       name: Status
       type: string
-    - jsonPath: .status.jobRef.name
-      name: Job
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date

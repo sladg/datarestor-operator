@@ -234,12 +234,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	configTasksController := controller.NewConfigTasksReconciler(deps)
-	if err = configTasksController.SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ConfigTasks")
-		os.Exit(1)
-	}
-
 	// Setup Tasks controller
 	tasksController := controller.NewTasksReconciler(deps)
 	if err = tasksController.SetupWithManager(mgr); err != nil {

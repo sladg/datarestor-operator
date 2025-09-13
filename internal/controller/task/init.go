@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func Init(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, time.Duration, error) {
+func Init(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (reconcile bool, period time.Duration, err error) {
 	logger := deps.Logger.Named("[InitTask]").With(
 		"task", task.Name,
 		"namespace", task.Namespace,
@@ -23,7 +23,7 @@ func Init(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, t
 
 	logger.Info("Task not initialized yet, initializing...")
 
-	task.Status.State = v1.TaskStatePending
+	task.Status.State = v1.TaskStateScalingDown
 	task.Status.InitializedAt = metav1.Now()
 
 	return true, constants.ImmediateRequeueInterval, nil

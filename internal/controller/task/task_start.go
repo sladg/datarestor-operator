@@ -9,13 +9,24 @@ import (
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	batchv1 "k8s.io/api/batch/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func Start(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, time.Duration, error) {
+func Start(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (reconcile bool, period time.Duration, err error) {
 	logger := deps.Logger.Named("[StartTask]").With("task", task.Name, "namespace", task.Namespace)
+
+	// Only start when transitioning from scaling-down logic
+	if task.Status.State != v1.TaskStateStarting {
+		return false, -1, nil
+	}
+
+	// If job already exists, adopt it
+	if exists, err := CheckJobExistsForTask(ctx, deps, task); err == nil && exists {
+		logger.Infow("Job already exists, adopting", "job", task.Status.JobRef.Name)
+		task.Status.State = v1.TaskStateRunning
+		return true, constants.ImmediateRequeueInterval, nil
+	}
 
 	job := batchv1.Job{
 		TypeMeta: metav1.TypeMeta{
@@ -27,13 +38,11 @@ func Start(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, 
 			Name:      task.Name + "-job",
 			Namespace: task.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: task.APIVersion,
-					Kind:       task.Kind,
-					Name:       task.Name,
-					UID:        task.UID,
-					Controller: ptr.To(true),
-				},
+				// While job is active, task should not be deleted
+				utils.TaskToOwnerReference(task),
+				// Job owns PVC during active operations to prevent PVC deletion
+				// This prevents PVC deletion while backup/restore is running
+				utils.PVCToOwnerReference(task.Spec.PVCRef),
 			},
 		},
 	}
@@ -42,30 +51,30 @@ func Start(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, 
 		logger.Errorw("Failed to unmarshal jobTemplate", err)
 
 		task.Status.State = v1.TaskStateFailed
-		return true, 0, err
+		return true, constants.ImmediateRequeueInterval, err
 	}
 
 	// Debug: Log the job spec to see what's missing
 	logger.Info("Creating job")
 
 	if err := deps.Create(ctx, &job); err != nil {
-		logger.Errorw("Failed to create job", err)
+		if client.IgnoreAlreadyExists(err) == nil {
+			logger.Infow("Job already exists, adopting", "job", job.Name)
+			task.Status.State = v1.TaskStateRunning
+
+			return true, constants.ImmediateRequeueInterval, nil
+		}
 
 		task.Status.State = v1.TaskStateFailed
+		logger.Errorw("Failed to create job", err)
 		return true, constants.ImmediateRequeueInterval, err
 	}
 
 	task.Status.State = v1.TaskStateRunning
-	task.Status.JobRef = corev1.ObjectReference{
-		APIVersion: "batch/v1",
-		Kind:       "Job",
-		Name:       job.Name,
-		Namespace:  job.Namespace,
-		UID:        job.UID,
-	}
+	task.Status.JobRef = utils.JobToRef(&job)
 
 	logger.Info("Job created")
 
 	// Will be requeued by the job changes
-	return true, 0, nil
+	return true, constants.ImmediateRequeueInterval, nil
 }

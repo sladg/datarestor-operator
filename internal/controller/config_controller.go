@@ -11,7 +11,6 @@ import (
 	"github.com/sladg/datarestor-operator/internal/constants"
 	config_util "github.com/sladg/datarestor-operator/internal/controller/config"
 	reconcile_util "github.com/sladg/datarestor-operator/internal/controller/reconiler"
-	task_util "github.com/sladg/datarestor-operator/internal/controller/task"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	"github.com/sladg/datarestor-operator/internal/controller/watches"
 
@@ -44,7 +43,15 @@ type ConfigReconciler struct {
 //nolint:gocyclo
 func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.Deps.Logger.Named("[ConfigReconciler]").With("name", req.Name, "namespace", req.Namespace)
-	logger.Info("Config reconciliation")
+	logger.Debug("Config reconciliation")
+
+	// Create a new Dependencies struct with the named logger for utility functions
+	deps := &utils.Dependencies{
+		Client: r.Deps.Client,
+		Scheme: r.Deps.Scheme,
+		Config: r.Deps.Config,
+		Logger: logger,
+	}
 
 	// Selectors can be provided on backupconfig-level or on repository-level (repository level takes precedence).
 	// AutoRestore and StopPods can be provided on backupconfig-level or on repository-level (repository level takes precedence).
@@ -55,64 +62,74 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Fetch the BackupConfig instance
 	config := &v1.Config{}
 
+	doObject := func() error { return deps.Update(ctx, config) }
+	doStatus := func() error { return deps.Status().Update(ctx, config) }
+	doDelete := func() error { return deps.Delete(ctx, config) }
+
 	// Check if config exists, return if not found or error
-	reconcile, period, err := reconcile_util.CheckResource(ctx, r.Deps, req, config)
-	if reconcile {
-		return ctrl.Result{RequeueAfter: period}, err
+	reconcile, period, err := reconcile_util.CheckResource(ctx, deps, corev1.ObjectReference{Name: req.Name, Namespace: req.Namespace}, config)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, nil); handled {
+		return res, err
 	}
 
-	noUpdate := func() error { return nil }
-	doObject := func() error { return r.Deps.Update(ctx, config) }
-	doStatus := func() error { return r.Deps.Status().Update(ctx, config) }
-	onDelete := func() error { return task_util.RemoveTasksByConfig(ctx, r.Deps, config) }
+	isNew := func() bool {
+		return config.Status.InitializedAt.IsZero()
+	}
 
 	// --------- Delete resource ---------
 	// If deleting, allow it. Remove any tasks references and remove finalizer
-	reconcile, period, err = reconcile_util.DeleteResourceWithFinalizer(ctx, r.Deps, config, constants.ConfigFinalizer, onDelete)
-	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
+	reconcile, period, err = reconcile_util.CheckDeleteResource(ctx, deps, config, constants.ConfigFinalizer)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, doDelete); handled {
 		return res, err
 	}
 
 	// --------- Add finalizer ---------
-	reconcile, period, err = reconcile_util.InitResource(ctx, r.Deps, config, constants.ConfigFinalizer)
+	reconcile, period, err = reconcile_util.InitResourceIfConditionMet(ctx, deps, config, constants.ConfigFinalizer, isNew)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 		return res, err
 	}
 
 	// --------- Initialize config ---------
-	reconcile, period, err = config_util.Init(ctx, r.Deps, config)
+	reconcile, period, err = config_util.Init(ctx, deps, config)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
 		return res, err
 	}
 
 	// --------- Sync repositories ---------
-	reconcile, period, err = config_util.SyncRepositories(ctx, r.Deps, config)
+	reconcile, period, err = config_util.SyncRepositories(ctx, deps, config)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
 		return res, err
 	}
 
 	// --------- Initialize repositories ---------
-	reconcile, period, err = config_util.InitRepositories(ctx, r.Deps, config)
+	reconcile, period, err = config_util.InitRepositories(ctx, deps, config)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
 		return res, err
 	}
 
-	pvcResult := config_util.ListPVCsForConfig(ctx, r.Deps, config)
+	pvcResult := config_util.ListPVCsForConfig(ctx, deps, config)
+
+	// @TODO: save information from restic for later use. Peridically re-check
+	// --------- Sync repository backup list from restic snapshots (early, on creation) ---------
+	// reconcile, period, err = config_util.SyncRepositoryBackups(ctx, r.Deps, config, pvcResult)
+	// if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
+	// 	return res, err
+	// }
 
 	// --------- Auto restore ---------
-	reconcile, period, err = config_util.AutoRestore(ctx, r.Deps, config, pvcResult)
-	if handled, res, err := reconcile_util.Step(err, reconcile, period, noUpdate); handled {
+	reconcile, period, err = config_util.AutoRestore(ctx, deps, config, pvcResult)
+	if handled, res, err := reconcile_util.Step(err, reconcile, period, nil); handled {
 		return res, err
 	}
 
 	// --------- Config restore ---------
-	reconcile, period, err = config_util.ConfigRestore(ctx, r.Deps, config, pvcResult)
+	reconcile, period, err = config_util.ConfigRestore(ctx, deps, config, pvcResult)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 		return res, err
 	}
 
 	// ------------ Process force-backup annotation on config ------------
-	reconcile, period, _ = config_util.ConfigBackup(ctx, r.Deps, config, pvcResult)
+	reconcile, period, _ = config_util.ConfigBackup(ctx, deps, config, pvcResult)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 		return res, err
 	}
@@ -120,25 +137,27 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Process PVCs one by one. If one matches, create Task and start reconciliation again.
 	for _, pvc := range pvcResult.MatchedPVCs {
 		// ------------------  Check for restore annotation ------------------
-		reconcile, period, err = config_util.PVCRestore(ctx, r.Deps, config, pvc)
+		reconcile, period, err = config_util.PVCRestore(ctx, deps, config, pvc)
 		if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 			return res, err
 		}
 
 		// ------------------  Check for backup annotation ------------------
-		reconcile, period, err = config_util.PVCBackup(ctx, r.Deps, config, pvc)
+		reconcile, period, err = config_util.PVCBackup(ctx, deps, config, pvc)
 		if handled, res, err := reconcile_util.Step(err, reconcile, period, doObject); handled {
 			return res, err
 		}
 	}
 
 	// Process scheduled backups for each repository. Run one-by-one.
-	reconcile, period, _ = config_util.ScheduleBackupRepositories(ctx, r.Deps, config, pvcResult)
+	reconcile, period, _ = config_util.ScheduleBackupRepositories(ctx, deps, config, pvcResult)
 	if handled, res, err := reconcile_util.Step(err, reconcile, period, doStatus); handled {
 		return res, err
 	}
 
 	// @TODO: Allow for repositories to be annotated for restore/backup
+
+	// @TODO: Add/Remove finalizer based on tasks running
 
 	logger.Info("Config reconciliation completed, requeueing")
 

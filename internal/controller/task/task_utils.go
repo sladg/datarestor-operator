@@ -14,6 +14,7 @@ import (
 // RemoveTasksByLabels deletes all Task resources matching the given labels.
 func RemoveTasksByConfig(ctx context.Context, deps *utils.Dependencies, config *v1.Config) error {
 	labels := map[string]string{
+		"managed-by":                       v1.OperatorDomain,
 		constants.LabelTaskParentName:      config.Name,
 		constants.LabelTaskParentNamespace: config.Namespace,
 	}
@@ -32,57 +33,36 @@ func RemoveTasksByConfig(ctx context.Context, deps *utils.Dependencies, config *
 	return nil
 }
 
-// GetTasksStatus aggregates statistics from a list of tasks
-func GetTasksStatus(tasks *v1.TaskList) v1.ConfigStatistics {
-	stats := v1.ConfigStatistics{}
-
-	for _, task := range tasks.Items {
-		// Only count backup tasks for statistics
-		if task.Spec.Type != v1.TaskTypeBackupScheduled && task.Spec.Type != v1.TaskTypeBackupManual {
-			continue
-		}
-
-		jobStatus := task.Status.State
-
-		switch jobStatus {
-		case v1.TaskStateCompleted:
-			stats.SuccessfulBackups++
-		case v1.TaskStateFailed:
-			stats.FailedBackups++
-		case v1.TaskStateRunning:
-			stats.RunningBackups++
-		}
-
-		// Note: Jobs with 0 Active, 0 Succeeded, 0 Failed are considered pending/not started
-	}
-
-	return stats
-}
-
-func CheckTaskScaleDown(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, time.Duration, error) {
+func CheckTaskScaleDown(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (reconcile bool, period time.Duration, err error) {
 	logger := deps.Logger.Named("[CheckTaskScaleDown]").With(
 		"task", task.Name,
 		"namespace", task.Namespace,
 		"pvc", task.Spec.PVCRef.Name,
 	)
 
-	if task.Status.State != v1.TaskStatePending {
+	// Only process if in ScalingDown state
+	if task.Status.State != v1.TaskStateScalingDown {
 		return false, -1, nil
 	}
 
-	if task.Spec.StopPods {
-		return false, -1, nil
+	// If not stopping pods, proceed to start immediately
+	if !task.Spec.StopPods {
+		task.Status.State = v1.TaskStateStarting
+		return true, constants.ImmediateRequeueInterval, nil
 	}
 
+	// We're in ScalingDown state - check if we need to start scaling
 	if task.Status.ScaledDownAt.IsZero() {
 		scaling, err := utils.ScaleDownWorkloadsForPVC(ctx, deps, task.Spec.PVCRef, task)
 		if err != nil {
 			logger.Warnw("Failed to scale down workloads, continuing ...", err)
-			return false, -1, err
+			task.Status.State = v1.TaskStateFailed
+			return true, constants.ImmediateRequeueInterval, err
 		}
 		if !scaling {
-			logger.Info("Workloads are not scaled down yet, requeuing ...")
-			return false, -1, nil
+			logger.Info("No workloads found for PVC, proceeding ...")
+			task.Status.State = v1.TaskStateStarting
+			return true, constants.ImmediateRequeueInterval, nil
 		}
 
 		task.Status.ScaledDownAt = metav1.Now()
@@ -93,7 +73,8 @@ func CheckTaskScaleDown(ctx context.Context, deps *utils.Dependencies, task *v1.
 	done, err := utils.IsScaleDownCompleteForPVC(ctx, deps, task.Spec.PVCRef)
 	if err != nil {
 		logger.Warnw("Failed to check if workloads are scaled down, continuing ...", err)
-		return false, -1, err
+		task.Status.State = v1.TaskStateFailed
+		return true, constants.ImmediateRequeueInterval, err
 	}
 	if !done {
 		logger.Info("Workloads are not scaled down yet, requeuing ...")
@@ -106,20 +87,22 @@ func CheckTaskScaleDown(ctx context.Context, deps *utils.Dependencies, task *v1.
 	return true, constants.ImmediateRequeueInterval, nil
 }
 
-func CheckTaskScaleUp(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (bool, time.Duration, error) {
+func CheckTaskScaleUp(ctx context.Context, deps *utils.Dependencies, task *v1.Task) (reconcile bool, period time.Duration, err error) {
 	logger := deps.Logger.Named("[CheckTaskScaleUp]").With(
 		"task", task.Name,
 		"namespace", task.Namespace,
 		"pvc", task.Spec.PVCRef.Name,
 	)
 
-	// Only scale up if task is completed or failed
-	if task.Status.State != v1.TaskStateCompleted && task.Status.State != v1.TaskStateFailed {
+	// Only process if in ScalingUp state
+	if task.Status.State != v1.TaskStateScalingUp {
 		return false, -1, nil
 	}
 
-	if task.Spec.StopPods {
-		return false, -1, nil
+	// If pods were not stopped, there is nothing to scale up
+	if !task.Spec.StopPods {
+		task.Status.State = v1.TaskStateCompleted
+		return true, constants.ImmediateRequeueInterval, nil
 	}
 
 	// Initialize the scaling up of workloads
@@ -127,11 +110,13 @@ func CheckTaskScaleUp(ctx context.Context, deps *utils.Dependencies, task *v1.Ta
 		scaling, err := utils.ScaleUpWorkloadsForPVC(ctx, deps, task.Spec.PVCRef, task)
 		if err != nil {
 			logger.Warnw("Failed to scale up workloads, continuing ...", err)
-			return false, -1, err
+			task.Status.State = v1.TaskStateFailed
+			return true, constants.ImmediateRequeueInterval, err
 		}
 		if !scaling {
-			logger.Info("Workloads are not scaled up yet, requeuing ...")
-			return false, -1, nil
+			logger.Info("No workloads found for PVC, proceeding ...")
+			task.Status.State = v1.TaskStateCompleted
+			return true, constants.ImmediateRequeueInterval, nil
 		}
 
 		task.Status.ScaledUpAt = metav1.Now()
@@ -142,7 +127,8 @@ func CheckTaskScaleUp(ctx context.Context, deps *utils.Dependencies, task *v1.Ta
 	done, err := utils.IsScaleUpCompleteForPVC(ctx, deps, task.Spec.PVCRef, task)
 	if err != nil {
 		logger.Warnw("Failed to check if workloads are scaled up, continuing ...", err)
-		return false, -1, err
+		task.Status.State = v1.TaskStateFailed
+		return true, constants.ImmediateRequeueInterval, err
 	}
 	if !done {
 		logger.Info("Workloads are not scaled up yet, requeuing ...")
@@ -151,5 +137,6 @@ func CheckTaskScaleUp(ctx context.Context, deps *utils.Dependencies, task *v1.Ta
 
 	logger.Info("Workloads are scaled up, task completed ...")
 
+	task.Status.State = v1.TaskStateCompleted
 	return true, constants.ImmediateRequeueInterval, nil
 }

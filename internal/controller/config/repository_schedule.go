@@ -10,7 +10,29 @@ import (
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
 	"github.com/sladg/datarestor-operator/internal/restic"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// hasActiveScheduledBackupTask returns true if there is any active (pending/starting/running)
+// scheduled backup task for the given PVC under the provided config. Errors are treated as no-active.
+func hasActiveScheduledBackupTask(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvcName string) bool {
+	existing := &v1.TaskList{}
+	if err := deps.List(ctx, existing, client.MatchingLabels(map[string]string{
+		constants.LabelTaskParentName:      config.Name,
+		constants.LabelTaskParentNamespace: config.Namespace,
+		constants.LabelTaskType:            string(v1.TaskTypeBackupScheduled),
+		constants.LabelTaskPVC:             pvcName,
+	})); err != nil {
+		return false
+	}
+
+	for _, t := range existing.Items {
+		if t.Status.State == v1.TaskStatePending || t.Status.State == v1.TaskStateStarting || t.Status.State == v1.TaskStateRunning {
+			return true
+		}
+	}
+	return false
+}
 
 func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, config *v1.Config, pvcResult ListPVCsForConfigResult) (bool, time.Duration, error) {
 	logger := deps.Logger.Named("[ScheduleBackupRepositories]").With(
@@ -26,10 +48,23 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 			continue
 		}
 
+		// We create tasks first, then update the last scheduled backup run
+		// So to avoid race condition, we have to check if there is already a pending/starting/running task for this PVC
 		repository.LastScheduledBackupRun = metav1.Now()
 
 		for _, pvc := range pvcResult.MatchedPVCs {
 			log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
+
+			// Avoid duplicate scheduled tasks
+			if hasActiveScheduledBackupTask(ctx, deps, config, pvc.Name) {
+				log.Infow("Scheduled backup task already active for PVC, skipping duplicate")
+				continue
+			}
+
+			taskName, taskSpecName := task_util.GenerateUniqueName(task_util.UniqueNameParams{
+				PVC:      pvc,
+				TaskType: v1.TaskTypeBackupScheduled,
+			})
 
 			// Build restic args for this repository and pvc
 			params := restic.MakeArgsParams{
@@ -37,6 +72,7 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 				Env:          config.Spec.Env,
 				TargetPVC:    pvc,
 				Annotation:   "now",
+				TaskName:     taskName,
 			}
 
 			args := restic.MakeBackupArgs(params)
@@ -44,12 +80,14 @@ func ScheduleBackupRepositories(ctx context.Context, deps *utils.Dependencies, c
 			mergedEnv := restic.MergeEnvs(config.Spec.Env, selectedRepo.Env)
 
 			backupTask := task_util.BuildTask(task_util.BuildTaskParams{
-				Config:   config,
-				PVC:      pvc,
-				Env:      mergedEnv,
-				Args:     args,
-				TaskType: v1.TaskTypeBackupScheduled,
-				StopPods: config.Spec.StopPods,
+				Config:       config,
+				PVC:          pvc,
+				Env:          mergedEnv,
+				Args:         args,
+				TaskName:     taskName,
+				TaskSpecName: taskSpecName,
+				TaskType:     v1.TaskTypeBackupScheduled,
+				StopPods:     config.Spec.StopPods,
 			})
 
 			if err := deps.Create(ctx, &backupTask); err != nil {

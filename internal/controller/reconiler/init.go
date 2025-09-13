@@ -6,39 +6,38 @@ import (
 
 	"github.com/sladg/datarestor-operator/internal/constants"
 	"github.com/sladg/datarestor-operator/internal/controller/utils"
-	ctrl "sigs.k8s.io/controller-runtime"
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func InitResource(ctx context.Context, deps *utils.Dependencies, resource client.Object, finalizer string) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[InitResource]").With("resource", resource.GetName(), "namespace", resource.GetNamespace())
+func InitResourceIfConditionMet(ctx context.Context, deps *utils.Dependencies, resource client.Object, finalizer string, conditionFn func() bool) (reconcile bool, period time.Duration, err error) {
+	logger := deps.Logger.Named("[InitResourceIfConditionMet]").With("resource", resource.GetName(), "namespace", resource.GetNamespace())
 
-	if controllerutil.ContainsFinalizer(resource, finalizer) {
+	if !conditionFn() {
 		return false, -1, nil
 	}
 
-	if resource.GetDeletionTimestamp() != nil {
+	logger.Infow("Adding finalizer", "finalizer", finalizer)
+
+	updated := controllerutil.AddFinalizer(resource, finalizer)
+	if updated {
+		return true, constants.ImmediateRequeueInterval, deps.Update(ctx, resource)
+	} else {
 		return false, -1, nil
 	}
-
-	logger.Info("Adding finalizer", "finalizer", finalizer)
-
-	controllerutil.AddFinalizer(resource, finalizer)
-
-	return true, constants.ImmediateRequeueInterval, nil
 }
 
-func CheckResource[T client.Object](ctx context.Context, deps *utils.Dependencies, req ctrl.Request, resource T) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[CheckResource]").With("resource", req.Name, "namespace", req.Namespace)
+func CheckResource[T client.Object](ctx context.Context, deps *utils.Dependencies, ref corev1.ObjectReference, resource T) (reconcile bool, period time.Duration, err error) {
+	logger := deps.Logger.Named("[CheckResource]").With("resource", ref.Name, "namespace", ref.Namespace)
 
-	isNotFound, isError, err := utils.IsObjectNotFound(ctx, deps, req, resource)
+	isNotFound, isError, err := utils.IsObjectNotFound(ctx, deps, ref, resource)
 	if isNotFound {
-		logger.Warn("Resource not found, might have been deleted")
-		return true, 0, nil
+		logger.Warn("Resource not found, ignoring ...")
+		return true, -1, nil
 	} else if isError {
 		logger.Errorw("Failed to get resource", err)
-		return true, 0, err
+		return true, constants.DefaultRequeueInterval, err
 	}
 
 	return false, constants.ImmediateRequeueInterval, nil

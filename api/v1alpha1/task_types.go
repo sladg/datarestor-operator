@@ -26,11 +26,13 @@ import (
 type TaskState string
 
 const (
-	TaskStatePending   TaskState = "Pending"  // Reconciler picking up, finazlier being added
-	TaskStateStarting  TaskState = "Starting" // Starting the underlying job
-	TaskStateRunning   TaskState = "Running"  // Job is running, observing it's status
-	TaskStateCompleted TaskState = "Completed"
-	TaskStateFailed    TaskState = "Failed"
+	TaskStatePending     TaskState = "Pending"     // Reconciler picking up, finazlier being added
+	TaskStateScalingDown TaskState = "ScalingDown" // Scaling down the workload
+	TaskStateStarting    TaskState = "Starting"    // Starting the underlying job
+	TaskStateRunning     TaskState = "Running"     // Job is running, observing it's status
+	TaskStateScalingUp   TaskState = "ScalingUp"   // Scaling up the workload
+	TaskStateCompleted   TaskState = "Completed"
+	TaskStateFailed      TaskState = "Failed"
 )
 
 type TaskType string
@@ -106,7 +108,6 @@ type TaskStatus struct {
 // +kubebuilder:printcolumn:name="Stop Pods",type="boolean",JSONPath=".spec.stopPods"
 // +kubebuilder:printcolumn:name="PVC",type="string",JSONPath=".spec.pvcRef.name"
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.state"
-// +kubebuilder:printcolumn:name="Job",type="string",JSONPath=".status.jobRef.name"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Task is the Schema for the tasks API

@@ -104,6 +104,11 @@ type RepositoryStatus struct {
 	// Information about the last scheduled backup run for this target
 	// +optional
 	LastScheduledBackupRun metav1.Time `json:"lastScheduledBackupRun"`
+
+	// Information about the last backup sync run for this target
+	// It lists the snapshots and annotates the PVCs with the information
+	// +optional
+	LastBackupSyncRun metav1.Time `json:"lastBackupSyncRun"`
 }
 
 type WorkloadInfo struct {
@@ -127,6 +132,7 @@ type ConfigStatus struct {
 	MatchedPVCsCount int32 `json:"matchedPVCsCount"`
 
 	// Statistics about the repository
+	// @TODO: Implement this.
 	// +optional
 	Statistics ConfigStatistics `json:"statistics"`
 

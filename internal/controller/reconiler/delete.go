@@ -10,8 +10,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func DeleteResourceWithFinalizer(ctx context.Context, deps *utils.Dependencies, resource client.Object, finalizer string, updateFunc func() error) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[DeleteResourceWithFinalizer]").With(
+func CheckDeleteResource(ctx context.Context, deps *utils.Dependencies, resource client.Object, finalizer string) (reconcile bool, period time.Duration, err error) {
+	logger := deps.Logger.Named("[CheckDeleteResource]").With(
 		"resource", resource.GetName(),
 		"namespace", resource.GetNamespace(),
 	)
@@ -20,41 +20,30 @@ func DeleteResourceWithFinalizer(ctx context.Context, deps *utils.Dependencies, 
 		return false, -1, nil
 	}
 
-	if !controllerutil.ContainsFinalizer(resource, finalizer) {
+	if controllerutil.ContainsFinalizer(resource, finalizer) {
+		logger.Info("Finalizer present, continuing ...")
 		return false, -1, nil
 	}
-
-	logger.Infow("Removing finalizer and allowing deletion", "deletionTimestamp", resource.GetDeletionTimestamp())
-
-	controllerutil.RemoveFinalizer(resource, finalizer)
-
-	if err := updateFunc(); err != nil {
-		return false, constants.ImmediateRequeueInterval, err
-	}
-
-	return true, constants.ImmediateRequeueInterval, deps.Update(ctx, resource)
-}
-
-func DeleteResourceWithConditionalFn(ctx context.Context, deps *utils.Dependencies, resource client.Object, finalizer string, conditionFn func() bool) (bool, time.Duration, error) {
-	logger := deps.Logger.Named("[DeleteResourceWithConditionalFn]").With(
-		"resource", resource.GetName(),
-		"namespace", resource.GetNamespace(),
-	)
-
-	if resource.GetDeletionTimestamp() == nil {
-		return false, -1, nil
-	}
-
-	if !controllerutil.ContainsFinalizer(resource, finalizer) {
-		return false, -1, nil
-	}
-
-	if !conditionFn() {
-		logger.Infow("Condition not met, requeuing", "deletionTimestamp", resource.GetDeletionTimestamp())
-		return false, constants.DefaultRequeueInterval, nil
-	}
-
-	controllerutil.RemoveFinalizer(resource, finalizer)
 
 	return true, constants.ImmediateRequeueInterval, nil
+}
+
+// RemoveFinalizerIfConditionMet removes a finalizer when a condition is met, regardless of deletion timestamp
+func RemoveFinalizerIfConditionMet(ctx context.Context, deps *utils.Dependencies, resource client.Object, finalizer string, conditionFn func() bool) (reconcile bool, period time.Duration, err error) {
+	logger := deps.Logger.Named("[RemoveFinalizerIfConditionMet]").With(
+		"resource", resource.GetName(),
+		"namespace", resource.GetNamespace(),
+	)
+
+	if !conditionFn() {
+		return false, -1, nil
+	}
+
+	updated := controllerutil.RemoveFinalizer(resource, finalizer)
+	if updated {
+		logger.Info("Condition met, finalizer removed")
+		return true, constants.ImmediateRequeueInterval, deps.Update(ctx, resource)
+	} else {
+		return false, -1, nil
+	}
 }

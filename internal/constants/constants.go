@@ -38,6 +38,8 @@ const (
 
 	LabelTaskParentName      = v1.OperatorDomain + "/task-parent-name"
 	LabelTaskParentNamespace = v1.OperatorDomain + "/task-parent-namespace"
+	LabelTaskType            = v1.OperatorDomain + "/task-type"
+	LabelTaskPVC             = v1.OperatorDomain + "/task-pvc"
 )
 
 const (

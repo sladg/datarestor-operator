@@ -67,7 +67,7 @@ func scaleSingleWorkload(ctx context.Context, c client.Client, workload client.O
 
 // FindWorkloadsForPVC returns top-level scalable workloads (Deployment/StatefulSet) mounting the PVC.
 func FindWorkloadsForPVC(ctx context.Context, c client.Client, pvc corev1.ObjectReference, logger *zap.SugaredLogger) ([]client.Object, error) {
-	logger = logger.Named("workload-scaler/find").With("pvc", pvc.Name, "namespace", pvc.Namespace)
+	logger = logger.Named("[FindWorkloadsForPVC]").With("pvc", pvc.Name, "namespace", pvc.Namespace)
 
 	podList := &corev1.PodList{}
 	if err := c.List(ctx, podList, client.InNamespace(pvc.Namespace)); err != nil {
@@ -214,6 +214,36 @@ func findScalableWorkload(ctx context.Context, c client.Client, owner *metav1.Ow
 	return nil, nil
 }
 
+// findWorkloadByUID finds a workload by its UID, kind, and name.
+func findWorkloadByUID(ctx context.Context, c client.Client, uid, kind, name, namespace string) (client.Object, error) {
+	switch kind {
+	case "Deployment":
+		dep := &appsv1.Deployment{}
+		if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, dep); err != nil {
+			return nil, client.IgnoreNotFound(err)
+		}
+		// Verify the UID matches to ensure we found the right workload
+		if string(dep.GetUID()) != uid {
+			return nil, fmt.Errorf("UID mismatch for deployment %s", name)
+		}
+		return dep, nil
+
+	case "StatefulSet":
+		sts := &appsv1.StatefulSet{}
+		if err := c.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, sts); err != nil {
+			return nil, client.IgnoreNotFound(err)
+		}
+		// Verify the UID matches to ensure we found the right workload
+		if string(sts.GetUID()) != uid {
+			return nil, fmt.Errorf("UID mismatch for statefulset %s", name)
+		}
+		return sts, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported workload kind: %s", kind)
+	}
+}
+
 // StopPodsInfo summarizes the effective stop-pods policy and its source.
 type StopPodsInfo struct {
 	Enabled         bool
@@ -265,38 +295,49 @@ func ScaleDownWorkloadsForPVC(ctx context.Context, deps *Dependencies, pvc corev
 }
 
 // ScaleUpWorkloadsForPVC restores replicas from the owner's original-replicas annotation.
-func ScaleUpWorkloadsForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object) (bool, error) {
+// Returns (scalingPerformed, error) where scalingPerformed indicates if any workloads were scaled up.
+func ScaleUpWorkloadsForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object) (scalingPerformed bool, err error) {
 	log := deps.Logger.Named("[ScaleUpWorkloadsForPVC]").With("pvc", pvc.Name, "namespace", pvc.Namespace)
 
-	workloads, err := FindWorkloadsForPVC(ctx, deps.Client, pvc, log)
+	originalReplicas, err := LoadOriginalReplicasFromAnnotation(owner)
 	if err != nil {
 		return false, err
 	}
-	if len(workloads) == 0 {
-		log.Info("No workloads found for PVC, skipping scale up")
-		return false, nil
-	}
-	originalReplicas, err := LoadOriginalReplicasFromAnnotation(owner)
-	if err != nil {
-		return true, err
-	}
 	if originalReplicas == nil {
 		log.Info("No original replica annotation found, skipping scale up")
-		return true, nil
+		return false, nil
 	}
-	for _, wl := range workloads {
-		info, ok := originalReplicas[string(wl.GetUID())]
-		if !ok {
+
+	scalingPerformed = false
+	// Use the stored workload information instead of trying to find workloads via pods
+	for uid, info := range originalReplicas {
+		workload, err := findWorkloadByUID(ctx, deps.Client, uid, info.Kind, info.Name, pvc.Namespace)
+		if err != nil {
+			log.Warnw("Failed to find workload by UID", err, "uid", uid, "kind", info.Kind, "name", info.Name)
 			continue
 		}
-		_ = scaleSingleWorkload(ctx, deps.Client, wl, info.Replicas, log)
+		if workload == nil {
+			log.Warnw("Workload not found", "uid", uid, "kind", info.Kind, "name", info.Name)
+			continue
+		}
+		if err := scaleSingleWorkload(ctx, deps.Client, workload, info.Replicas, log); err != nil {
+			log.Warnw("Failed to scale workload", err, "workload", workload.GetName())
+			continue
+		}
+		scalingPerformed = true
 	}
-	return true, RemoveOriginalReplicasAnnotation(ctx, deps, owner)
+
+	// Remove the annotation regardless of whether scaling was performed
+	if err := RemoveOriginalReplicasAnnotation(ctx, deps, owner); err != nil {
+		return scalingPerformed, err
+	}
+
+	return scalingPerformed, nil
 }
 
 // IsScaleDownCompleteForPVC returns true if all workloads mounting the PVC report 0 ready replicas.
-func IsScaleDownCompleteForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference) (bool, error) {
-	log := deps.Logger.Named("workload-scaler/status-down").With("pvc", pvc.Name, "namespace", pvc.Namespace)
+func IsScaleDownCompleteForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference) (complete bool, err error) {
+	log := deps.Logger.Named("[IsScaleDownCompleteForPVC]").With("pvc", pvc.Name, "namespace", pvc.Namespace)
 	workloads, err := FindWorkloadsForPVC(ctx, deps.Client, pvc, log)
 	if err != nil {
 		return false, err
@@ -310,8 +351,8 @@ func IsScaleDownCompleteForPVC(ctx context.Context, deps *Dependencies, pvc core
 }
 
 // IsScaleUpCompleteForPVC returns true if all annotated workloads have reached their original replicas.
-func IsScaleUpCompleteForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object) (bool, error) {
-	log := deps.Logger.Named("workload-scaler/status-up").With("pvc", pvc.Name, "namespace", pvc.Namespace)
+func IsScaleUpCompleteForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object) (complete bool, err error) {
+	log := deps.Logger.Named("[IsScaleUpCompleteForPVC]").With("pvc", pvc.Name, "namespace", pvc.Namespace)
 	originalReplicas, err := LoadOriginalReplicasFromAnnotation(owner)
 	if err != nil {
 		return false, err
@@ -336,7 +377,7 @@ func IsScaleUpCompleteForPVC(ctx context.Context, deps *Dependencies, pvc corev1
 }
 
 // WaitForScaleDownForPVC waits until all workloads report 0 ready replicas or timeout.
-func WaitForScaleDownForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, timeout time.Duration, interval time.Duration) error {
+func WaitForScaleDownForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, timeout time.Duration, interval time.Duration) (err error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		done, err := IsScaleDownCompleteForPVC(ctx, deps, pvc)
@@ -352,7 +393,7 @@ func WaitForScaleDownForPVC(ctx context.Context, deps *Dependencies, pvc corev1.
 }
 
 // WaitForScaleUpForPVC waits until all annotated workloads reach original replicas or timeout.
-func WaitForScaleUpForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object, timeout time.Duration, interval time.Duration) error {
+func WaitForScaleUpForPVC(ctx context.Context, deps *Dependencies, pvc corev1.ObjectReference, owner client.Object, timeout time.Duration, interval time.Duration) (err error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		done, err := IsScaleUpCompleteForPVC(ctx, deps, pvc, owner)

@@ -41,6 +41,11 @@ func GetPVCsForConfig(ctx context.Context, deps *Dependencies, config *v1.Config
 				continue
 			}
 
+			// Skip PVCs that are being deleted
+			if IsPVCBeingDeleted(&pvc) {
+				continue
+			}
+
 			seen[uid] = true
 			requests = append(requests, &pvc)
 		}
@@ -86,4 +91,21 @@ func FilterUnclaimedPVCs(managedPVCs []*corev1.PersistentVolumeClaim, Logger *za
 	}
 
 	return newPVCs
+}
+
+// IsPVCBeingDeleted checks if a PVC is being deleted (has DeletionTimestamp set)
+func IsPVCBeingDeleted(pvc *corev1.PersistentVolumeClaim) bool {
+	return pvc.DeletionTimestamp != nil
+}
+
+// IsPVCDeletedOrBeingDeleted checks if a PVC is deleted (not found) or being deleted
+func IsPVCDeletedOrBeingDeleted(ctx context.Context, deps *Dependencies, pvcRef corev1.ObjectReference) bool {
+	pvc := &corev1.PersistentVolumeClaim{}
+	err := deps.Get(ctx, client.ObjectKey{Name: pvcRef.Name, Namespace: pvcRef.Namespace}, pvc)
+	if err != nil {
+		// PVC not found - consider it deleted
+		return true
+	}
+	// PVC found - check if it's being deleted
+	return pvc.DeletionTimestamp != nil
 }

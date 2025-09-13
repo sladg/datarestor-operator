@@ -1,7 +1,9 @@
 package restic
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 
@@ -93,4 +95,42 @@ func ExecCheckSnapshotExists(ctx context.Context, logger *zap.SugaredLogger, env
 	}
 
 	return string(output), nil
+}
+
+// Snapshot is a minimal representation of a restic snapshot returned by --json
+type Snapshot struct {
+	ID      string   `json:"id"`
+	ShortID string   `json:"short_id"`
+	Time    string   `json:"time"`
+	Tags    []string `json:"tags"`
+	Host    string   `json:"hostname"`
+}
+
+// ExecListSnapshots executes `restic snapshots --json` with the provided args and parses the JSON output.
+func ExecListSnapshots(ctx context.Context, logger *zap.SugaredLogger, env []corev1.EnvVar, args ...string) ([]Snapshot, error) {
+	// Use global option --no-cache to avoid HOME/XDG cache warnings; parse stdout only
+	arguments := []string{"--no-cache", "snapshots", "--json"}
+	arguments = append(arguments, args...)
+
+	cmd := exec.CommandContext(ctx, "restic", arguments...)
+	// Provide sane defaults first, then allow provided env to override
+	cmd.Env = append(cmd.Env, "HOME=/tmp", "RESTIC_CACHE_DIR=/tmp/restic-cache")
+	cmd.Env = append(cmd.Env, convertEnv(env)...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		logger.Errorw("Restic list snapshots failed", err, "stderr", stderr.String(), "stdout", stdout.String())
+		return nil, fmt.Errorf("restic snapshots failed: %w, stderr: %s", err, stderr.String())
+	}
+
+	out := stdout.Bytes()
+	var snaps []Snapshot
+	if err := json.Unmarshal(out, &snaps); err != nil {
+		logger.Errorw("Failed to parse restic snapshots JSON", err, "stdout", stdout.String(), "stderr", stderr.String())
+		return nil, fmt.Errorf("parse snapshots json failed: %w", err)
+	}
+	return snaps, nil
 }

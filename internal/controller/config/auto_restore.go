@@ -30,13 +30,26 @@ func AutoRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Confi
 
 	for _, pvc := range pvcResult.UnclaimedPVCs {
 		log := logger.With("pvc", pvc.Name, "pvcNamespace", pvc.Namespace)
+
+		// Skip PVCs that are being deleted to prevent race conditions
+		if utils.IsPVCBeingDeleted(pvc) {
+			log.Info("Skipping PVC in terminating state")
+			continue
+		}
+
 		log.Info("New unclaimed PVC detected")
+
+		taskName, taskSpecName := task_util.GenerateUniqueName(task_util.UniqueNameParams{
+			PVC:      pvc,
+			TaskType: v1.TaskTypeRestoreAutomated,
+		})
 
 		params := restic.MakeArgsParams{
 			Repositories: config.Spec.Repositories,
 			Env:          config.Spec.Env,
 			TargetPVC:    pvc,
-			Annotation:   "", // Let Task figure out best restore point
+			Annotation:   pvc.Annotations[constants.AnnRestore],
+			TaskName:     taskName,
 		}
 
 		args := restic.MakeRestoreArgs(params)
@@ -45,12 +58,14 @@ func AutoRestore(ctx context.Context, deps *utils.Dependencies, config *v1.Confi
 
 		// Create restore task for each PVC
 		restoreTask := task_util.BuildTask(task_util.BuildTaskParams{
-			Config:   config,
-			PVC:      pvc,
-			Env:      mergedEnv,
-			Args:     args,
-			TaskType: v1.TaskTypeRestoreAutomated,
-			StopPods: config.Spec.StopPods,
+			Config:       config,
+			PVC:          pvc,
+			Env:          mergedEnv,
+			Args:         args,
+			StopPods:     config.Spec.StopPods,
+			TaskName:     taskName,
+			TaskSpecName: taskSpecName,
+			TaskType:     v1.TaskTypeRestoreAutomated,
 		})
 
 		if err := deps.Create(ctx, &restoreTask); err != nil {

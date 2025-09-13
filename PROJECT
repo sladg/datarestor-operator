@@ -15,7 +15,7 @@ resources:
     controller: true
     domain: datarestor-operator.com
     group: backup
-    kind: BackupConfig
+    kind: Config
     path: github.com/sladg/datarestor-operator/api/v1alpha1
     version: v1alpha1
 version: "3"
