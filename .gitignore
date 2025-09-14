@@ -28,6 +28,3 @@ go.work
 
 main
 dist
-
-# Auto-generated Helm charts
-charts/
