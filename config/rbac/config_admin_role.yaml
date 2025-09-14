@@ -17,11 +17,13 @@ rules:
       - backup.datarestor-operator.com
     resources:
       - configs
+      - tasks
     verbs:
       - "*"
   - apiGroups:
       - backup.datarestor-operator.com
     resources:
       - configs/status
+      - tasks/status
     verbs:
       - get

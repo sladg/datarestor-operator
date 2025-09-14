@@ -17,6 +17,7 @@ rules:
       - backup.datarestor-operator.com
     resources:
       - configs
+      - tasks
     verbs:
       - create
       - delete
@@ -29,5 +30,6 @@ rules:
       - backup.datarestor-operator.com
     resources:
       - configs/status
+      - tasks/status
     verbs:
       - get

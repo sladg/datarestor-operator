@@ -163,7 +163,8 @@ The Helm chart is generated in the `charts/datarestor-operator/` directory and a
 - [x] Verify manual restore on existing PVC,
 - [x] Verify manual restore on new PVC (specify other PVC to restore from),
 - [x] Fix CRD statuses to correctly match and update based on events.
-- [x] Helm chart support with automatic generation using helmify
+- [x] Helm chart support with automatic generation using helmify.
+- [ ] Add support for ARM64, Darwin, etc. into helm chart.
 - [ ] Verify working with sqlite database with continuous writes.
 - [ ] Allow for extended configuration of restic (compression, pruning, etc.)
 - [ ] Verify working with PostgreSQL database with continuous writes.

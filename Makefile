@@ -114,14 +114,6 @@ release: ## Compute next semver, generate chart, commit and tag (does not push)
 	GHCR_REPO=ghcr.io/sladg/datarestor-operator CHART_NAME=datarestor-operator CHART_OUT_DIR=charts/datarestor-operator \
 	./scripts/release.sh $(ARGS)
 
-.PHONY: helm
-helm: ## Generate Helm chart (scripted)
-	GHCR_REPO=ghcr.io/sladg/datarestor-operator \
-	APP_VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
-	CHART_NAME=datarestor-operator \
-	CHART_OUT_DIR=charts/datarestor-operator \
-	./scripts/gen-helm.sh
-
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go

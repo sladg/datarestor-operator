@@ -12,18 +12,4 @@ metadata:
     app.kubernetes.io/name: datarestor-operator
     app.kubernetes.io/managed-by: kustomize
   name: config-viewer-role
-rules:
-  - apiGroups:
-      - backup.datarestor-operator.com
-    resources:
-      - configs
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - backup.datarestor-operator.com
-    resources:
-      - configs/status
-    verbs:
-      - get
+rules: []
