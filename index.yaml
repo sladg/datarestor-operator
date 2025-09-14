@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  datarestor-operator:
+  - apiVersion: v2
+    appVersion: 0.0.2
+    created: "2025-09-14T09:10:32.938846626Z"
+    description: A Helm chart for Kubernetes
+    digest: c1d7ef00ed3859018a7a1b505c72166eb1eb9a199e5c9583ce89bb6ff4f11dc0
+    name: datarestor-operator
+    type: application
+    urls:
+    - datarestor-operator-0.0.2.tgz
+    version: 0.0.2
+generated: "2025-09-14T09:10:32.938851755Z"
