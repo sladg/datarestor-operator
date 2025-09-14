@@ -72,7 +72,7 @@ CHART_VERSION="${APP_VERSION#v}"
 
 # Update values.yaml with the correct image repository and tag
 if [ -f "$CHART_DIR/values.yaml" ]; then
-  "$YQ_BIN" -i ".controllerManager.manager.image.repository = \"$GHCR_REPO\" | .controllerManager.manager.image.tag = \"$APP_VERSION\"" "$CHART_DIR/values.yaml"
+"$YQ_BIN" -i ".controllerManager.manager.image.repository = \"$GHCR_REPO\" | .controllerManager.manager.image.tag = \"$CHART_VERSION\"" "$CHART_DIR/values.yaml"
 else
   echo "Warning: values.yaml not found in $CHART_DIR. Skipping values stamping." >&2
 fi
@@ -86,4 +86,4 @@ echo "Helm chart generated and stamped:"
 echo "  Chart dir: $CHART_OUT_DIR"
 echo "  Chart version: $CHART_VERSION"
 echo "  App version: $APP_VERSION"
-echo "  Image: ${GHCR_REPO}:${APP_VERSION}"
+echo "  Image: ${GHCR_REPO}:${CHART_VERSION}"

@@ -12,7 +12,7 @@ controllerManager:
       readOnlyRootFilesystem: true
     image:
       repository: ghcr.io/sladg/datarestor-operator
-      tag: v0.0.3
+      tag: 0.0.3-dirty
     imagePullPolicy: IfNotPresent
     resources:
       limits:
