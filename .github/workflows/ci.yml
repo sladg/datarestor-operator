@@ -165,6 +165,20 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
+      - name: Set chart version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          echo "Setting chart version=${VERSION} and appVersion=${TAG}"
+          for chart in charts/*/Chart.yaml; do
+            [ -f "$chart" ] || continue
+            sed -i.bak -E "s/^version: .*/version: ${VERSION}/" "$chart"
+            sed -i.bak -E "s/^appVersion: .*/appVersion: \"${TAG}\"/" "$chart"
+            rm -f "$chart.bak"
+          done
+
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.7.0
         with:

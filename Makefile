@@ -1,5 +1,5 @@
 # Image URL to use all building/pushing image targets
-IMG ?= kind.local/datarestor-operator:latest
+IMG ?= kind.local/datarestor-operator:latest # ghcr.io/sladg/datarestor-operator:v0.0.1
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -61,10 +61,6 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
 KIND_CLUSTER ?= kind
 
 .PHONY: setup-test-e2e
@@ -105,6 +101,27 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 ##@ Build
 
+.PHONY: helm
+helm: ## Generate Helm chart (scripted)
+	GHCR_REPO=ghcr.io/sladg/datarestor-operator \
+	APP_VERSION=$$(git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev) \
+	CHART_NAME=datarestor-operator \
+	CHART_OUT_DIR=charts/datarestor-operator \
+	./scripts/gen-helm.sh
+
+.PHONY: release
+release: ## Compute next semver, generate chart, commit and tag (does not push)
+	GHCR_REPO=ghcr.io/sladg/datarestor-operator CHART_NAME=datarestor-operator CHART_OUT_DIR=charts/datarestor-operator \
+	./scripts/release.sh $(ARGS)
+
+.PHONY: helm
+helm: ## Generate Helm chart (scripted)
+	GHCR_REPO=ghcr.io/sladg/datarestor-operator \
+	APP_VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
+	CHART_NAME=datarestor-operator \
+	CHART_OUT_DIR=charts/datarestor-operator \
+	./scripts/gen-helm.sh
+
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
@@ -113,33 +130,15 @@ build: manifests generate fmt vet ## Build manager binary.
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
 
-# If you wish to build the manager image targeting other platforms you can use the --platform flag.
-# (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
-# More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
+	@echo "Built image: ${IMG}"
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
-
-# PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
-# architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
-# - be able to use docker buildx. More info: https://docs.docker.com/build/buildx/
-# - have enabled BuildKit. More info: https://docs.docker.com/develop/develop-images/build_enhancements/
-# - be able to push the image to your registry (i.e. if you do not set a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
-# To adequately provide solutions that are compatible with multiple platforms, you should consider using this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
-.PHONY: docker-buildx
-docker-buildx: ## Build and push docker image for the manager for cross-platform support
-	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
-	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name datarestor-operator-builder
-	$(CONTAINER_TOOL) buildx use datarestor-operator-builder
-	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm datarestor-operator-builder
-	rm Dockerfile.cross
+	@echo "Pushed image: ${IMG}"
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
@@ -147,52 +146,6 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
-##@ Helm
-
-# Helm chart directory
-HELM_CHART_DIR ?= charts/datarestor-operator
-
-.PHONY: helmify
-helmify: $(HELMIFY) ## Download helmify locally if necessary.
-
-.PHONY: helm
-helm: manifests kustomize helmify ## Generate Helm chart from Kustomize manifests using helmify
-	@echo "Generating Helm chart using helmify..."
-	@mkdir -p charts
-	@cd charts && $(KUSTOMIZE) build ../config/default | $(HELMIFY) datarestor-operator
-	@echo "Helm chart generated in $(HELM_CHART_DIR)"
-
-.PHONY: helm-package
-helm-package: helm ## Package the Helm chart
-	helm package $(HELM_CHART_DIR) -d dist/
-
-.PHONY: helm-lint
-helm-lint: helm ## Lint the Helm chart
-	helm lint $(HELM_CHART_DIR)
-
-.PHONY: helm-template
-helm-template: helm ## Generate Helm templates
-	helm template datarestor-operator $(HELM_CHART_DIR)
-
-.PHONY: helm-dry-run
-helm-dry-run: helm ## Dry run Helm installation
-	helm install datarestor-operator $(HELM_CHART_DIR) --dry-run --debug
-
-.PHONY: helm-install
-helm-install: helm ## Install the Helm chart
-	helm install datarestor-operator $(HELM_CHART_DIR) --namespace datarestor-operator-system --create-namespace
-
-.PHONY: helm-uninstall
-helm-uninstall: ## Uninstall the Helm chart
-	helm uninstall datarestor-operator --namespace datarestor-operator-system
-
-.PHONY: helm-upgrade
-helm-upgrade: helm ## Upgrade the Helm chart
-	helm upgrade datarestor-operator $(HELM_CHART_DIR) --namespace datarestor-operator-system
-
-.PHONY: helm-test
-helm-test: ## Test the Helm chart
-	helm test datarestor-operator --namespace datarestor-operator-system
 
 ##@ Deployment
 
@@ -213,6 +166,7 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 	$(KIND) load docker-image ${IMG} --name $(KIND_CLUSTER)
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | $(KUBECTL) apply -f -
+	@echo "Deployed image: ${IMG} to cluster: $(KIND_CLUSTER)"
 
 .PHONY: deploy-restart
 deploy-restart: deploy ## Deploy controller and restart the operator pod.
@@ -239,7 +193,6 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
-HELMIFY ?= $(LOCALBIN)/helmify
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
@@ -249,7 +202,6 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.1.6
-HELMIFY_VERSION ?= v0.4.4
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -278,11 +230,6 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
-
-.PHONY: helmify
-helmify: $(HELMIFY) ## Download helmify locally if necessary.
-$(HELMIFY): $(LOCALBIN)
-	$(call go-install-tool,$(HELMIFY),github.com/arttor/helmify/cmd/helmify,$(HELMIFY_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

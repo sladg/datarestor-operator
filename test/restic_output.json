@@ -1,0 +1,29 @@
+[
+  {
+    "time": "2025-09-10T10:37:23.720445505Z",
+    "tree": "7df378e4b68e28a9250b7450aceab6ef60f714ed078aaedfd0e658fc7e9f0384",
+    "paths": ["/data"],
+    "hostname": "default-simple-app-data",
+    "username": "root",
+    "tags": ["name=0102"],
+    "program_version": "restic 0.18.0",
+    "summary": {
+      "backup_start": "2025-09-10T10:37:23.720445505Z",
+      "backup_end": "2025-09-10T10:37:24.210741256Z",
+      "files_new": 1,
+      "files_changed": 0,
+      "files_unmodified": 0,
+      "dirs_new": 1,
+      "dirs_changed": 0,
+      "dirs_unmodified": 0,
+      "data_blobs": 1,
+      "tree_blobs": 2,
+      "data_added": 875,
+      "data_added_packed": 739,
+      "total_files_processed": 1,
+      "total_bytes_processed": 160
+    },
+    "id": "075e06bb5e94ea929fab6fdbb9584af3eb5176dbe3f5fed048002d490cd8bcdd",
+    "short_id": "075e06bb"
+  }
+]
