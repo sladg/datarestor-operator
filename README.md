@@ -171,6 +171,7 @@ The Helm chart is generated in the `charts/datarestor-operator/` directory and a
 - [ ] Support secrets refs in envs.
 - [ ] Add support for snapshot verification.
 - [ ] Improve how we find auto-restore snapshot. We should go one-by-one based on repository priority and see if backup exists. If not, we should move to next repository.
+- [ ] Allow for negative matching of selectors - I want to backup whole PVC but exclude for example CNPG's PVCs.
 - [ ] Allow for per-selector and per-repository configuration of auto-restore and stopPods (forget as well?).
 - [ ] (Future) Fix permissions for secrets (envs) in CRDs.
 - [ ] (Future) Allow for snapshots of volumes instead of copy-paste of file system - quicker backups/restores.

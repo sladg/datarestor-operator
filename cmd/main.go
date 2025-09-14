@@ -27,6 +27,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	uberzap "go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -86,23 +87,44 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.BoolVar(&developmentLogging, "development-logging", true, "Enable development-friendly, console-based logging.")
+
+	// Bind standard controller-runtime zap flags (e.g., --zap-log-level)
+	zapOpts := zap.Options{
+		Development: developmentLogging,
+	}
+	zapOpts.BindFlags(flag.CommandLine)
+
 	flag.Parse()
 
-	// Use a more configurable zap logger
+	// Set controller-runtime's logger using bound zap options
+	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zapOpts)))
+
+	// Build a global zap logger with the same level as controller-runtime
 	var zapLogger *uberzap.Logger
 	var err error
+	var cfg uberzap.Config
 	if developmentLogging {
-		zapLogger, err = uberzap.NewDevelopment()
+		cfg = uberzap.NewDevelopmentConfig()
 	} else {
-		zapLogger, err = uberzap.NewProduction()
+		cfg = uberzap.NewProductionConfig()
 	}
+	// Derive a concrete zapcore.Level from the controller-runtime level enabler
+	lvl := zapcore.InfoLevel
+	if zapOpts.Level.Enabled(zapcore.DebugLevel) {
+		lvl = zapcore.DebugLevel
+	} else if zapOpts.Level.Enabled(zapcore.InfoLevel) {
+		lvl = zapcore.InfoLevel
+	} else if zapOpts.Level.Enabled(zapcore.WarnLevel) {
+		lvl = zapcore.WarnLevel
+	} else if zapOpts.Level.Enabled(zapcore.ErrorLevel) {
+		lvl = zapcore.ErrorLevel
+	}
+	cfg.Level = uberzap.NewAtomicLevelAt(lvl)
+	zapLogger, err = cfg.Build()
 	if err != nil {
 		setupLog.Error(err, "unable to create zap logger")
 		os.Exit(1)
 	}
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&zap.Options{
-		Development: developmentLogging,
-	}))) // Set controller-runtime's logger
 
 	// Set the global zap logger so zap.S() works correctly
 	uberzap.ReplaceGlobals(zapLogger)
